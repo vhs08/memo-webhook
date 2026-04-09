@@ -1,5 +1,5 @@
 // Memo Assistant — WhatsApp Webhook Handler (Phase 2)
-// Fluxo: recebe mensagem → (se áudio) transcreve com Whisper → categoriza com GPT-5-nano
+// Fluxo: recebe mensagem → (se áudio) transcreve com Whisper → categoriza com GPT-4o-mini
 //         → grava no Supabase → envia confirmação via WhatsApp
 
 // ============================================
@@ -54,6 +54,8 @@ export default async function handler(req, res) {
     }
     return res.status(200).json({ status: 'ok' });
   }
+
+  return res.status(405).send('Method not allowed');
 }
 
 // ============================================
@@ -107,11 +109,17 @@ async function processMessage(body) {
     return;
   }
 
-  // --- Categoriza com GPT-5-nano ---
+  // --- Categoriza com GPT-4o-mini (retorna JSON estruturado) ---
   let category = 'OUTROS';
+  let metadata = null;
   try {
-    category = await categorize(originalText);
+    const result = await categorize(originalText);
+    category = result.category;
+    metadata = result.metadata;
     console.log(`Categorized as: ${category}`);
+    if (metadata) {
+      console.log(`Metadata: ${JSON.stringify(metadata)}`);
+    }
   } catch (err) {
     console.error('Categorization failed:', err);
     // Continua com OUTROS — não bloqueia o fluxo
@@ -184,20 +192,46 @@ async function transcribeAudio(mediaId) {
 }
 
 // ============================================
-// CATEGORIZAÇÃO (GPT-5-nano)
+// CATEGORIZAÇÃO (GPT-4o-mini com saída JSON estruturada)
 // ============================================
 async function categorize(text) {
-  const systemPrompt = `Você é um assistente que categoriza mensagens de pais sobre suas crianças e casa.
-Categorize em UMA das seguintes categorias, respondendo APENAS com o nome em maiúsculas, sem explicação:
+  const systemPrompt = `Você é um assistente que categoriza mensagens curtas de pais brasileiros/UK sobre suas crianças, casa e vida doméstica.
 
-AGENDA - compromissos, reuniões, aniversários, eventos futuros, datas
-FINANCAS - pagamentos, mensalidades, contas, dinheiro, despesas
-SAUDE - médico, remédio, sintomas, consultas, vacinas, dentista
-ESCOLA - lição de casa, prova, reunião escolar, professor, boletim, material
-RECADOS - lembretes, coisas para comprar, tarefas domésticas, compras
-OUTROS - qualquer coisa que não se encaixe acima
+Sua tarefa: ler a mensagem e devolver um JSON estruturado com a categoria + metadados úteis.
 
-Responda APENAS com uma palavra da lista acima.`;
+CATEGORIAS VÁLIDAS (escolha EXATAMENTE UMA):
+- AGENDA: compromissos, reuniões, aniversários, eventos futuros com data/hora, encontros sociais
+- FINANCAS: pagamentos, mensalidades, contas a pagar, dinheiro, despesas, boletos, transferências
+- SAUDE: médico, dentista, remédio, sintomas, consultas, vacinas, exames, terapia, GP, NHS
+- ESCOLA: lição de casa, prova, reunião escolar, professor, boletim, material escolar, uniforme
+- RECADOS: lembretes gerais, coisas para comprar (supermercado, farmácia, loja), tarefas domésticas
+- OUTROS: tudo que não se encaixa acima
+
+REGRAS DE PRIORIDADE (o VERBO da ação manda, não o sujeito):
+1. Se o verbo é "pagar", "quitar", "transferir", "boleto", "mensalidade" → FINANCAS SEMPRE (ex: "pagar dentista" → FINANCAS, "pagar futebol do Luigi" → FINANCAS, "pagar escola" → FINANCAS)
+2. Se o verbo é "marcar consulta", "ir ao médico/dentista", "tomar remédio", "exame" → SAUDE (ex: "marcar dentista" → SAUDE)
+3. Se há data/hora específica e o foco é o evento em si (sem ser pagamento) → AGENDA (ex: "futebol do Luigi sábado 9am" → AGENDA)
+4. Se o contexto é claramente escolar (reunião de pais, lição, prova, boletim) e NÃO é pagamento → ESCOLA
+5. "Comprar X" (supermercado, farmácia, loja) → RECADOS, mesmo que X seja remédio (o foco é ir comprar)
+6. RECADOS é fallback pra tarefas e compras do dia a dia antes de OUTROS
+7. OUTROS só quando realmente nada se aplica
+
+PRINCÍPIO GERAL: o que define a categoria é a AÇÃO que o usuário precisa tomar, não o contexto. "Pagar dentista" a ação é pagar (financeira), o dentista é só o destinatário.
+
+FORMATO DA RESPOSTA (JSON válido, sem texto fora):
+{
+  "category": "AGENDA" | "FINANCAS" | "SAUDE" | "ESCOLA" | "RECADOS" | "OUTROS",
+  "confidence": "high" | "medium" | "low",
+  "needs_review": true | false,
+  "clean_text": "texto da mensagem limpo e com pontuação correta",
+  "person": "nome da pessoa mencionada ou null",
+  "date_text": "texto da data como aparece na mensagem, ou null",
+  "time_text": "texto do horário como aparece na mensagem, ou null",
+  "action_summary": "resumo curto da ação em 3-7 palavras"
+}
+
+Use confidence "low" e needs_review true quando a mensagem for ambígua ou você hesitar entre duas categorias.
+Responda APENAS com o JSON, nada mais.`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -211,8 +245,9 @@ Responda APENAS com uma palavra da lista acima.`;
         { role: 'system', content: systemPrompt },
         { role: 'user', content: text }
       ],
-      max_completion_tokens: 10,
-      temperature: 0
+      max_tokens: 300,
+      temperature: 0,
+      response_format: { type: 'json_object' }
     })
   });
 
@@ -222,9 +257,33 @@ Responda APENAS com uma palavra da lista acima.`;
   }
 
   const data = await res.json();
-  const raw = data.choices?.[0]?.message?.content?.trim().toUpperCase() || 'OUTROS';
+  const raw = data.choices?.[0]?.message?.content || '{}';
+
+  // Parse JSON — se falhar, cai em OUTROS com low confidence
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    console.error('Failed to parse GPT JSON:', raw);
+    return { category: 'OUTROS', metadata: { confidence: 'low', needs_review: true, parse_error: true } };
+  }
+
   // Valida: se o GPT retornar algo fora da lista, cai pra OUTROS
-  return VALID_CATEGORIES.includes(raw) ? raw : 'OUTROS';
+  const rawCategory = (parsed.category || '').toUpperCase();
+  const category = VALID_CATEGORIES.includes(rawCategory) ? rawCategory : 'OUTROS';
+
+  // Metadata: tudo menos a categoria (que já sai separado)
+  const metadata = {
+    confidence: parsed.confidence || 'medium',
+    needs_review: parsed.needs_review || false,
+    clean_text: parsed.clean_text || null,
+    person: parsed.person || null,
+    date_text: parsed.date_text || null,
+    time_text: parsed.time_text || null,
+    action_summary: parsed.action_summary || null
+  };
+
+  return { category, metadata };
 }
 
 // ============================================
