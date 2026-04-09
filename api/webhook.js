@@ -2,7 +2,6 @@
 // Fluxo: recebe mensagem → (se áudio) transcreve com Whisper → categoriza com GPT-4o-mini
 //         → grava no Supabase → envia confirmação via WhatsApp
 // Categorias (4): FINANCAS, COMPRAS, AGENDA, LEMBRETES
-// Regra de simetria de tempo verbal: passado confirmado = FINANCAS/COMPRAS; futuro pendente = LEMBRETES
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -126,6 +125,9 @@ async function processMessage(body) {
   }
 
   // --- Grava no Supabase ---
+  // FIX Phase 2 closure: agora salva também o metadata JSONB extraído pelo GPT
+  // (shopping_items, date_text, time_text, person, recurrence, action_summary, etc.)
+  // Isso é pré-requisito do Phase 4 (cron vai depender desses campos).
   try {
     await saveToSupabase({
       phone_number: phoneNumber,
@@ -133,7 +135,8 @@ async function processMessage(body) {
       original_text: originalText,
       audio_url: audioUrl,
       category: category,
-      status: 'processed'
+      status: 'processed',
+      metadata: metadata
     });
     console.log('Saved to Supabase');
   } catch (err) {
@@ -177,6 +180,9 @@ async function transcribeAudio(mediaId) {
   formData.append('file', new Blob([audioBuffer], { type: 'audio/ogg' }), 'audio.ogg');
   formData.append('model', 'whisper-1');
   formData.append('language', 'pt');
+  // Prompt de vocabulário: ajuda o Whisper a transcrever nomes próprios
+  // e termos recorrentes corretamente (ex: "Luigi" não vira "Luídio").
+  formData.append('prompt', 'Nomes: Luigi, Antonella, Victor, Suelen. Memo assistente. Termos: Tesco, mercado, escola, dentista, consulta, farmácia, GP, boleto, mensalidade, pilates, academia, futebol.');
 
   const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST',
