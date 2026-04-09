@@ -207,16 +207,33 @@ CATEGORIAS VÁLIDAS (escolha EXATAMENTE UMA):
 - RECADOS: lembretes gerais, coisas para comprar (supermercado, farmácia, loja), tarefas domésticas
 - OUTROS: tudo que não se encaixa acima
 
-REGRAS DE PRIORIDADE (o VERBO da ação manda, não o sujeito):
-1. Se o verbo é "pagar", "quitar", "transferir", "boleto", "mensalidade" → FINANCAS SEMPRE (ex: "pagar dentista" → FINANCAS, "pagar futebol do Luigi" → FINANCAS, "pagar escola" → FINANCAS)
-2. Se o verbo é "marcar consulta", "ir ao médico/dentista", "tomar remédio", "exame" → SAUDE (ex: "marcar dentista" → SAUDE)
-3. Se há data/hora específica e o foco é o evento em si (sem ser pagamento) → AGENDA (ex: "futebol do Luigi sábado 9am" → AGENDA)
-4. Se o contexto é claramente escolar (reunião de pais, lição, prova, boletim) e NÃO é pagamento → ESCOLA
-5. "Comprar X" (supermercado, farmácia, loja) → RECADOS, mesmo que X seja remédio (o foco é ir comprar)
-6. RECADOS é fallback pra tarefas e compras do dia a dia antes de OUTROS
-7. OUTROS só quando realmente nada se aplica
+REGRAS DE PRIORIDADE — AVALIE NESTA ORDEM EXATA (pare na primeira que bater):
 
-PRINCÍPIO GERAL: o que define a categoria é a AÇÃO que o usuário precisa tomar, não o contexto. "Pagar dentista" a ação é pagar (financeira), o dentista é só o destinatário.
+PASSO 1 — FINANCAS (verbo financeiro ganha de tudo):
+Se o verbo é "pagar", "quitar", "transferir", "boleto", "mensalidade", "fatura" → FINANCAS SEMPRE.
+Exemplos: "pagar dentista" → FINANCAS, "pagar futebol do Luigi" → FINANCAS, "pagar escola" → FINANCAS, "pagar consulta amanhã" → FINANCAS.
+
+PASSO 2 — SAUDE (ação médica explícita, sem pagamento):
+Se o verbo é "marcar consulta", "ir ao médico/dentista", "tomar remédio", "fazer exame", "vacinar", "NHS/GP" → SAUDE.
+Exemplos: "marcar dentista" → SAUDE, "Luigi tem dentista sexta" → SAUDE.
+
+PASSO 3 — ESCOLA (contexto escolar, sem pagamento):
+Se o contexto é claramente escolar (reunião de pais, lição de casa, prova, boletim, professor, material/uniforme escolar, apresentação da escola) → ESCOLA.
+IMPORTANTE: ESCOLA ganha de AGENDA mesmo quando a mensagem tem data/hora. "Reunião de pais terça 18h" → ESCOLA, NÃO AGENDA.
+Exemplos: "reunião de pais na escola terça" → ESCOLA, "prova de matemática amanhã" → ESCOLA.
+
+PASSO 4 — RECADOS (verbo "comprar" ou tarefa de rua/loja):
+Se o verbo é "comprar", "buscar na loja", "passar no mercado/farmácia" → RECADOS, mesmo que o item seja remédio ou material escolar (o foco é ir comprar).
+Exemplos: "comprar leite no Tesco" → RECADOS, "comprar remédio da Antonella" → RECADOS, "buscar uniforme na loja" → RECADOS.
+
+PASSO 5 — AGENDA (fallback pra eventos com data/hora):
+Só chega aqui se a mensagem NÃO é pagamento, NÃO é ação médica, NÃO é contexto escolar, NÃO é compra. É um evento/compromisso genérico com data/hora.
+Exemplos: "aniversário da vovó sábado" → AGENDA, "futebol do Luigi 9am" → AGENDA, "jantar com João sexta" → AGENDA.
+
+PASSO 6 — OUTROS (último recurso):
+Só quando realmente nada acima se aplica.
+
+PRINCÍPIO GERAL: o que define a categoria é a AÇÃO que o usuário precisa tomar, não o contexto. "Pagar dentista" a ação é pagar (financeira), o dentista é só o destinatário. AGENDA NÃO é pra qualquer coisa com data/hora — é fallback pra eventos genéricos que não cabem em categorias mais específicas.
 
 FORMATO DA RESPOSTA (JSON válido, sem texto fora):
 {
