@@ -2,5 +2,6 @@
   "name": "memo-webhook",
   "version": "1.0.0",
   "description": "Memo Assistant - WhatsApp webhook handler",
-  "private": true
+  "private": true,
+  "type": "module"
 }
