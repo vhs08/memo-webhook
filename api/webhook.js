@@ -206,12 +206,12 @@ Responda APENAS com uma palavra da lista acima.`;
       Authorization: `Bearer ${OPENAI_API_KEY}`
     },
     body: JSON.stringify({
-      model: 'gpt-5-nano',
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: text }
       ],
-      max_completion_tokens: 500,
+      max_completion_tokens: 10,
       temperature: 0
     })
   });
