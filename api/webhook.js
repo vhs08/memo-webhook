@@ -2,6 +2,7 @@
 // Fluxo: recebe mensagem → (se áudio) transcreve com Whisper → categoriza com GPT-4o-mini
 //         → grava no Supabase → envia confirmação via WhatsApp
 // Categorias (4): FINANCAS, COMPRAS, AGENDA, LEMBRETES
+// Regra de simetria de tempo verbal: passado confirmado = FINANCAS/COMPRAS; futuro pendente = LEMBRETES
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -141,7 +142,7 @@ async function processMessage(body) {
 
   // --- Envia confirmação de volta ao usuário ---
   try {
-    const emoji = CATEGORY_EMOJI[category] || '📝';
+    const emoji = CATEGORY_EMOJI[category] || '📦';
     const preview = originalText.length > 80 ? originalText.substring(0, 80) + '...' : originalText;
     const replyText = `${emoji} Anotado em ${category}:\n"${preview}"`;
     await sendWhatsAppReply(phoneNumber, replyText);
@@ -199,19 +200,25 @@ async function categorize(text) {
 Sua tarefa: ler a mensagem do usuário e devolver um JSON estruturado com a categoria + metadados úteis.
 
 CATEGORIAS VÁLIDAS (escolha EXATAMENTE UMA das 4):
-- FINANCAS: pagamentos, contas a pagar, boletos, transferências, mensalidades
-- COMPRAS: registro de compras JÁ REALIZADAS (verbo no passado: "comprei", "já comprei", "comprou", "adquiri")
+- FINANCAS: movimento financeiro JÁ CONFIRMADO (verbo no passado: "paguei", "gastei", "transferi", "recebi")
+- COMPRAS: registro de compra JÁ REALIZADA (verbo no passado: "comprei", "já comprei", "adquiri")
 - AGENDA: compromissos/eventos com data/hora específica OU com recorrência, pra comparecer
-- LEMBRETES: tudo mais — tarefas pendentes, coisas a fazer, itens a repor, booking a realizar
+- LEMBRETES: TODAS as pendências — pagar, comprar, fazer, marcar, itens a repor, tarefas a realizar
 
 REGRAS DE PRIORIDADE — AVALIE NESTA ORDEM EXATA (pare na primeira que bater):
 
-PASSO 1 — FINANCAS (verbo financeiro ganha de tudo):
-Se o verbo é "pagar", "quitar", "transferir", "boleto", "mensalidade", "fatura" → FINANCAS SEMPRE, independente do tempo verbal.
-Exemplos: "pagar dentista 20/04" → FINANCAS, "pagar futebol do Luigi" → FINANCAS, "pagar escola" → FINANCAS, "pagar consulta amanhã" → FINANCAS, "paguei a luz" → FINANCAS.
+PASSO 1 — FINANCAS (movimento financeiro JÁ CONFIRMADO, verbo no passado):
+Só quando o verbo está EXPLICITAMENTE no passado: "paguei", "já paguei", "quitei", "gastei", "transferi", "recebi", "depositei". É registro de uma transação que JÁ ACONTECEU.
+Exemplos:
+- "Paguei a dentista hoje" → FINANCAS
+- "Já paguei a mensalidade do Luigi" → FINANCAS
+- "Gastei 200 libras no mercado" → FINANCAS
+- "Transferi pro aluguel" → FINANCAS
+- "Recebi o salário" → FINANCAS
+IMPORTANTE: "Pagar X" (infinitivo/futuro) NÃO é FINANCAS — é LEMBRETES (PASSO 4). Pagamento pendente é tarefa, não registro financeiro.
 
-PASSO 2 — COMPRAS (log de compra JÁ FEITA):
-Só quando o verbo está EXPLICITAMENTE no passado: "comprei", "comprou", "já comprei", "acabei de comprar", "adquiri". É registro de uma compra que ACONTECEU — não é ação futura.
+PASSO 2 — COMPRAS (log de compra JÁ FEITA, verbo no passado):
+Só quando o verbo está EXPLICITAMENTE no passado: "comprei", "comprou", "já comprei", "acabei de comprar", "adquiri". É registro de uma compra que ACONTECEU.
 Exemplos: "Comprei leite no Tesco" → COMPRAS, "Já comprei o remédio da Antonella" → COMPRAS, "Comprei uniforme novo do Luigi" → COMPRAS.
 IMPORTANTE: "Comprar X" (infinitivo/futuro) NÃO é COMPRAS — é LEMBRETES (PASSO 4).
 
@@ -225,21 +232,25 @@ Exemplos:
 - "Mercado todo sábado" → AGENDA (evento recorrente)
 - "Academia segunda, quarta e sexta 7h" → AGENDA (recorrente)
 - "Catequese domingo de manhã" → AGENDA (recorrente)
+- "Tenho entrevista de emprego amanhã 9h" → AGENDA
 
-PASSO 4 — LEMBRETES (fallback — tarefas pendentes e coisas a fazer):
-Tudo que não é pagamento (PASSO 1), não é compra feita no passado (PASSO 2), e não é evento marcado com hora (PASSO 3).
+PASSO 4 — LEMBRETES (fallback — TODAS as pendências):
+Tudo que NÃO é passado financeiro confirmado (PASSO 1), NÃO é compra feita no passado (PASSO 2), e NÃO é evento marcado com hora/recorrência (PASSO 3). Toda pendência ativa cai aqui.
 Inclui:
-- Compras a fazer — "comprar X" no infinitivo/futuro, mesmo com lista ("comprar leite e pão no Tesco")
-- Itens esgotados / a repor — "acabou os ovos", "não tem mais sal", "falta papel higiênico", "tô sem café" (todos viram tarefa de compra pendente)
+- Pagamentos a fazer — "pagar dentista sexta", "pagar futebol do Luigi", "pagar escola", "boleto vence dia 20", "mensalidade da academia"
+- Compras a fazer — "comprar X" no infinitivo, listas de mercado ("comprar leite e pão no Tesco")
+- Itens esgotados / a repor — "acabou os ovos", "não tem mais sal", "falta papel higiênico", "tô sem café"
 - Booking a realizar — "marcar consulta do Luigi no GP quinta", "agendar dentista", "ligar pra reservar mesa"
-- Tarefas escolares sem horário — "boletim do Luigi chegou", "ajudar Luigi com lição de casa", "comunicado do professor"
+- Tarefas escolares sem horário — "boletim do Luigi chegou", "ajudar Luigi com lição de casa", "entregar trabalho dia 13"
 - Tarefas domésticas sem hora — "levar roupa na lavanderia", "consertar torneira"
 
-PRINCÍPIO GERAL: a AÇÃO define a categoria.
-- Pagar (qualquer tempo verbal) → FINANCAS
-- "Comprei" (passado) → COMPRAS; "Comprar" (infinitivo) → LEMBRETES
-- Comparecer num evento com hora marcada ou recorrente → AGENDA
-- Qualquer outra tarefa/lembrete pendente → LEMBRETES
+PRINCÍPIO GERAL: o TEMPO VERBAL define a categoria.
+- Pretérito financeiro ("paguei", "gastei") → FINANCAS
+- Pretérito de compra ("comprei") → COMPRAS
+- Evento com hora marcada OU recorrência → AGENDA
+- TUDO MAIS (incluindo "pagar X" e "comprar X" no futuro/infinitivo) → LEMBRETES
+
+Regra mnemônica: passado confirmado vira log (FINANCAS/COMPRAS); futuro pendente vira tarefa (LEMBRETES); evento marcado vira compromisso (AGENDA).
 
 EXTRAÇÃO DE METADADOS IMPORTANTES:
 - "recurrence": se a mensagem explicita um padrão de repetição ("todo sábado", "toda semana", "todo dia 5"), capture em linguagem natural. Senão null.
