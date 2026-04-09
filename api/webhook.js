@@ -44,20 +44,16 @@ export default async function handler(req, res) {
 
   // --- POST: mensagem recebida da Meta ---
   if (req.method === 'POST') {
-    // IMPORTANTE: respondemos 200 IMEDIATAMENTE pra Meta não reenviar.
-    // O processamento pesado (Whisper + GPT) acontece depois, em background.
-    res.status(200).json({ status: 'ok' });
-
-    // Processa em background (não bloqueia a resposta)
+    // IMPORTANTE: em serverless (Vercel), a função é terminada assim que
+    // a resposta é enviada. Por isso processamos ANTES de responder 200.
+    // Meta tolera até ~20s — temos folga para Whisper + GPT + Supabase + reply.
     try {
       await processMessage(req.body);
     } catch (error) {
       console.error('Error processing message:', error);
     }
-    return;
+    return res.status(200).json({ status: 'ok' });
   }
-
-  return res.status(405).send('Method not allowed');
 }
 
 // ============================================
