@@ -1,6 +1,7 @@
 // Memo Assistant — WhatsApp Webhook Handler (Phase 2)
 // Fluxo: recebe mensagem → (se áudio) transcreve com Whisper → categoriza com GPT-4o-mini
 //         → grava no Supabase → envia confirmação via WhatsApp
+// Categorias (4): FINANCAS, COMPRAS, AGENDA, LEMBRETES
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -12,17 +13,15 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
-// Categorias válidas (conforme PRD v1.3)
-const VALID_CATEGORIES = ['AGENDA', 'FINANCAS', 'SAUDE', 'ESCOLA', 'RECADOS', 'OUTROS'];
+// Categorias válidas (taxonomia simplificada 2026-04-09: 4 categorias)
+const VALID_CATEGORIES = ['AGENDA', 'COMPRAS', 'LEMBRETES', 'FINANCAS'];
 
 // Emojis de confirmação por categoria
 const CATEGORY_EMOJI = {
   AGENDA: '📅',
-  FINANCAS: '💰',
-  SAUDE: '💊',
-  ESCOLA: '🎒',
-  RECADOS: '📝',
-  OUTROS: '📦'
+  COMPRAS: '🛒',
+  LEMBRETES: '📝',
+  FINANCAS: '💰'
 };
 
 // ============================================
@@ -110,7 +109,7 @@ async function processMessage(body) {
   }
 
   // --- Categoriza com GPT-4o-mini (retorna JSON estruturado) ---
-  let category = 'OUTROS';
+  let category = 'LEMBRETES'; // fallback se a API falhar
   let metadata = null;
   try {
     const result = await categorize(originalText);
@@ -122,7 +121,7 @@ async function processMessage(body) {
     }
   } catch (err) {
     console.error('Categorization failed:', err);
-    // Continua com OUTROS — não bloqueia o fluxo
+    // Continua com LEMBRETES — não bloqueia o fluxo
   }
 
   // --- Grava no Supabase ---
@@ -142,7 +141,7 @@ async function processMessage(body) {
 
   // --- Envia confirmação de volta ao usuário ---
   try {
-    const emoji = CATEGORY_EMOJI[category] || '📦';
+    const emoji = CATEGORY_EMOJI[category] || '📝';
     const preview = originalText.length > 80 ? originalText.substring(0, 80) + '...' : originalText;
     const replyText = `${emoji} Anotado em ${category}:\n"${preview}"`;
     await sendWhatsAppReply(phoneNumber, replyText);
@@ -195,59 +194,72 @@ async function transcribeAudio(mediaId) {
 // CATEGORIZAÇÃO (GPT-4o-mini com saída JSON estruturada)
 // ============================================
 async function categorize(text) {
-  const systemPrompt = `Você é um assistente que categoriza mensagens curtas de pais brasileiros/UK sobre suas crianças, casa e vida doméstica.
+  const systemPrompt = `Você é o cérebro de categorização do Memo, um assistente de WhatsApp pra pais brasileiros/UK gerenciarem a vida doméstica.
 
-Sua tarefa: ler a mensagem e devolver um JSON estruturado com a categoria + metadados úteis.
+Sua tarefa: ler a mensagem do usuário e devolver um JSON estruturado com a categoria + metadados úteis.
 
-CATEGORIAS VÁLIDAS (escolha EXATAMENTE UMA):
-- AGENDA: compromissos, reuniões, aniversários, eventos futuros com data/hora, encontros sociais
-- FINANCAS: pagamentos, mensalidades, contas a pagar, dinheiro, despesas, boletos, transferências
-- SAUDE: médico, dentista, remédio, sintomas, consultas, vacinas, exames, terapia, GP, NHS
-- ESCOLA: lição de casa, prova, reunião escolar, professor, boletim, material escolar, uniforme
-- RECADOS: lembretes gerais, coisas para comprar (supermercado, farmácia, loja), tarefas domésticas
-- OUTROS: tudo que não se encaixa acima
+CATEGORIAS VÁLIDAS (escolha EXATAMENTE UMA das 4):
+- FINANCAS: pagamentos, contas a pagar, boletos, transferências, mensalidades
+- COMPRAS: registro de compras JÁ REALIZADAS (verbo no passado: "comprei", "já comprei", "comprou", "adquiri")
+- AGENDA: compromissos/eventos com data/hora específica OU com recorrência, pra comparecer
+- LEMBRETES: tudo mais — tarefas pendentes, coisas a fazer, itens a repor, booking a realizar
 
 REGRAS DE PRIORIDADE — AVALIE NESTA ORDEM EXATA (pare na primeira que bater):
 
 PASSO 1 — FINANCAS (verbo financeiro ganha de tudo):
-Se o verbo é "pagar", "quitar", "transferir", "boleto", "mensalidade", "fatura" → FINANCAS SEMPRE.
-Exemplos: "pagar dentista" → FINANCAS, "pagar futebol do Luigi" → FINANCAS, "pagar escola" → FINANCAS, "pagar consulta amanhã" → FINANCAS.
+Se o verbo é "pagar", "quitar", "transferir", "boleto", "mensalidade", "fatura" → FINANCAS SEMPRE, independente do tempo verbal.
+Exemplos: "pagar dentista 20/04" → FINANCAS, "pagar futebol do Luigi" → FINANCAS, "pagar escola" → FINANCAS, "pagar consulta amanhã" → FINANCAS, "paguei a luz" → FINANCAS.
 
-PASSO 2 — SAUDE (ação médica explícita, sem pagamento):
-Se o verbo é "marcar consulta", "ir ao médico/dentista", "tomar remédio", "fazer exame", "vacinar", "NHS/GP" → SAUDE.
-Exemplos: "marcar dentista" → SAUDE, "Luigi tem dentista sexta" → SAUDE.
+PASSO 2 — COMPRAS (log de compra JÁ FEITA):
+Só quando o verbo está EXPLICITAMENTE no passado: "comprei", "comprou", "já comprei", "acabei de comprar", "adquiri". É registro de uma compra que ACONTECEU — não é ação futura.
+Exemplos: "Comprei leite no Tesco" → COMPRAS, "Já comprei o remédio da Antonella" → COMPRAS, "Comprei uniforme novo do Luigi" → COMPRAS.
+IMPORTANTE: "Comprar X" (infinitivo/futuro) NÃO é COMPRAS — é LEMBRETES (PASSO 4).
 
-PASSO 3 — ESCOLA (contexto escolar, sem pagamento):
-Se o contexto é claramente escolar (reunião de pais, lição de casa, prova, boletim, professor, material/uniforme escolar, apresentação da escola) → ESCOLA.
-IMPORTANTE: ESCOLA ganha de AGENDA mesmo quando a mensagem tem data/hora. "Reunião de pais terça 18h" → ESCOLA, NÃO AGENDA.
-Exemplos: "reunião de pais na escola terça" → ESCOLA, "prova de matemática amanhã" → ESCOLA.
+PASSO 3 — AGENDA (compromissos marcados ou recorrentes):
+Compromissos/eventos com data/hora específica pra comparecer, OU eventos recorrentes (padrão "todo sábado", "toda semana", "todo dia 5"). O usuário precisa estar presente ou fazer a coisa naquele momento.
+Exemplos:
+- "Luigi tem dentista sexta 14h" → AGENDA (compromisso já marcado)
+- "Reunião de pais na escola terça 18h" → AGENDA (evento marcado; escola é só localização)
+- "Aniversário da vovó sábado 15h" → AGENDA
+- "Futebol do Luigi sábado 9am" → AGENDA
+- "Mercado todo sábado" → AGENDA (evento recorrente)
+- "Academia segunda, quarta e sexta 7h" → AGENDA (recorrente)
+- "Catequese domingo de manhã" → AGENDA (recorrente)
 
-PASSO 4 — RECADOS (verbo "comprar" ou tarefa de rua/loja):
-Se o verbo é "comprar", "buscar na loja", "passar no mercado/farmácia" → RECADOS, mesmo que o item seja remédio ou material escolar (o foco é ir comprar).
-Exemplos: "comprar leite no Tesco" → RECADOS, "comprar remédio da Antonella" → RECADOS, "buscar uniforme na loja" → RECADOS.
+PASSO 4 — LEMBRETES (fallback — tarefas pendentes e coisas a fazer):
+Tudo que não é pagamento (PASSO 1), não é compra feita no passado (PASSO 2), e não é evento marcado com hora (PASSO 3).
+Inclui:
+- Compras a fazer — "comprar X" no infinitivo/futuro, mesmo com lista ("comprar leite e pão no Tesco")
+- Itens esgotados / a repor — "acabou os ovos", "não tem mais sal", "falta papel higiênico", "tô sem café" (todos viram tarefa de compra pendente)
+- Booking a realizar — "marcar consulta do Luigi no GP quinta", "agendar dentista", "ligar pra reservar mesa"
+- Tarefas escolares sem horário — "boletim do Luigi chegou", "ajudar Luigi com lição de casa", "comunicado do professor"
+- Tarefas domésticas sem hora — "levar roupa na lavanderia", "consertar torneira"
 
-PASSO 5 — AGENDA (fallback pra eventos com data/hora):
-Só chega aqui se a mensagem NÃO é pagamento, NÃO é ação médica, NÃO é contexto escolar, NÃO é compra. É um evento/compromisso genérico com data/hora.
-Exemplos: "aniversário da vovó sábado" → AGENDA, "futebol do Luigi 9am" → AGENDA, "jantar com João sexta" → AGENDA.
+PRINCÍPIO GERAL: a AÇÃO define a categoria.
+- Pagar (qualquer tempo verbal) → FINANCAS
+- "Comprei" (passado) → COMPRAS; "Comprar" (infinitivo) → LEMBRETES
+- Comparecer num evento com hora marcada ou recorrente → AGENDA
+- Qualquer outra tarefa/lembrete pendente → LEMBRETES
 
-PASSO 6 — OUTROS (último recurso):
-Só quando realmente nada acima se aplica.
-
-PRINCÍPIO GERAL: o que define a categoria é a AÇÃO que o usuário precisa tomar, não o contexto. "Pagar dentista" a ação é pagar (financeira), o dentista é só o destinatário. AGENDA NÃO é pra qualquer coisa com data/hora — é fallback pra eventos genéricos que não cabem em categorias mais específicas.
+EXTRAÇÃO DE METADADOS IMPORTANTES:
+- "recurrence": se a mensagem explicita um padrão de repetição ("todo sábado", "toda semana", "todo dia 5"), capture em linguagem natural. Senão null.
+- "shopping_items": se a mensagem implica itens a comprar (compras pendentes OU compras feitas), extraia a lista de itens como array. Ex: "acabou os ovos" → ["ovos"], "comprar leite e pão" → ["leite", "pão"], "comprei sal e açúcar" → ["sal", "açúcar"]. Senão null.
+- "needs_review": true quando a mensagem é ambígua ou tem dois verbos fortes em categorias diferentes (ex: "marcar dentista e pagar recepção").
 
 FORMATO DA RESPOSTA (JSON válido, sem texto fora):
 {
-  "category": "AGENDA" | "FINANCAS" | "SAUDE" | "ESCOLA" | "RECADOS" | "OUTROS",
+  "category": "FINANCAS" | "COMPRAS" | "AGENDA" | "LEMBRETES",
   "confidence": "high" | "medium" | "low",
   "needs_review": true | false,
   "clean_text": "texto da mensagem limpo e com pontuação correta",
   "person": "nome da pessoa mencionada ou null",
   "date_text": "texto da data como aparece na mensagem, ou null",
   "time_text": "texto do horário como aparece na mensagem, ou null",
+  "recurrence": "padrão de repetição em linguagem natural, ou null",
+  "shopping_items": ["item1", "item2"] ou null,
   "action_summary": "resumo curto da ação em 3-7 palavras"
 }
 
-Use confidence "low" e needs_review true quando a mensagem for ambígua ou você hesitar entre duas categorias.
 Responda APENAS com o JSON, nada mais.`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -276,18 +288,18 @@ Responda APENAS com o JSON, nada mais.`;
   const data = await res.json();
   const raw = data.choices?.[0]?.message?.content || '{}';
 
-  // Parse JSON — se falhar, cai em OUTROS com low confidence
+  // Parse JSON — se falhar, cai em LEMBRETES com low confidence
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
     console.error('Failed to parse GPT JSON:', raw);
-    return { category: 'OUTROS', metadata: { confidence: 'low', needs_review: true, parse_error: true } };
+    return { category: 'LEMBRETES', metadata: { confidence: 'low', needs_review: true, parse_error: true } };
   }
 
-  // Valida: se o GPT retornar algo fora da lista, cai pra OUTROS
+  // Valida: se o GPT retornar algo fora da lista, cai pra LEMBRETES (fallback seguro)
   const rawCategory = (parsed.category || '').toUpperCase();
-  const category = VALID_CATEGORIES.includes(rawCategory) ? rawCategory : 'OUTROS';
+  const category = VALID_CATEGORIES.includes(rawCategory) ? rawCategory : 'LEMBRETES';
 
   // Metadata: tudo menos a categoria (que já sai separado)
   const metadata = {
@@ -297,6 +309,8 @@ Responda APENAS com o JSON, nada mais.`;
     person: parsed.person || null,
     date_text: parsed.date_text || null,
     time_text: parsed.time_text || null,
+    recurrence: parsed.recurrence || null,
+    shopping_items: Array.isArray(parsed.shopping_items) ? parsed.shopping_items : null,
     action_summary: parsed.action_summary || null
   };
 
