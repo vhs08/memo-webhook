@@ -211,7 +211,7 @@ Responda APENAS com uma palavra da lista acima.`;
         { role: 'system', content: systemPrompt },
         { role: 'user', content: text }
       ],
-      max_tokens: 10,
+      max_completion_tokens: 10,
       temperature: 0
     })
   });
