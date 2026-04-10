@@ -1,5 +1,5 @@
 // Memo Assistant — WhatsApp Webhook Handler (Phase 3 — Personas v6)
-// Vercel Serverless Function - api/webhook.js
+// Vercel Serverless Function - api/webhook.js (ES Module)
 // Fluxo: recebe mensagem → (onboarding se user novo) → (áudio vira texto via Whisper)
 //         → categoriza com GPT-4o-mini → grava no Supabase → gera reply com persona
 // Categorias (5): FINANCAS, COMPRAS, AGENDA, IDEIAS, LEMBRETES
@@ -106,7 +106,6 @@ Com base nisso, gere o JSON com as decisões de planejamento.`;
     if (!res.ok) {
       const errText = await res.text();
       console.error(`Planner GPT API failed: ${res.status} ${errText}`);
-      // Fallback planning decisions in case of API failure
       return {
         reply_intent: 'routine_capture',
         can_suggest_next_step: false,
@@ -124,7 +123,6 @@ Com base nisso, gere o JSON com as decisões de planejamento.`;
       planning_decisions = JSON.parse(rawPlan);
     } catch (err) {
       console.error('Failed to parse Planner GPT JSON:', rawPlan, err);
-      // Fallback planning decisions in case of parsing failure
       planning_decisions = {
         reply_intent: 'routine_capture',
         can_suggest_next_step: false,
@@ -645,9 +643,9 @@ async function sendWhatsAppReply(to, text) {
 }
 
 // ============================================
-// WEBHOOK HANDLER PRINCIPAL (Vercel Export)
+// WEBHOOK HANDLER PRINCIPAL (ES Module Export)
 // ============================================
-module.exports = async (req, res) => {
+export default async (req, res) => {
   // Verificação do webhook (GET request)
   if (req.method === 'GET') {
     const mode = req.query['hub.mode'];
