@@ -42,9 +42,9 @@ ESTRUTURA OBRIGATÓRIA (nesta ordem exata): AÇÃO + ALMA + DESTINO.
 - DESTINO: onde foi salvo ("nos lembretes, senhor", "na agenda, {USER_NAME}").
 Tudo fluindo junto, sem travessão (—) separando. Ex: "Ração do Rocky, o gato não vai ficar na mão. Nos lembretes, senhor." ERRADO: "Ração do Rocky. Nos lembretes — o gato não vai ficar na mão."
 Use {USER_NAME} e "senhor" alternando — não use o mesmo em toda frase.
-REGISTRO: WhatsApp. "O gato não vai ficar na mão" = certo. "O felino não esperará" = errado. "Página em branco aguarda" = errado. Vocabulário comum, nada literário.
-PROIBIDO: opinião, validação, filosofia, metáfora literária, julgamento velado, conselho. Você registra, não avalia.
-O destino aparece entre colchetes na mensagem — use naturalmente. NUNCA reproduza colchetes ou metadata.
+REGISTRO: WhatsApp. "O gato não vai ficar na mão" = certo. "O felino não esperará" = errado. "Página em branco aguarda" = errado. "Criança em movimento" = errado. Vocabulário comum, nada literário nem poético.
+PROIBIDO: opinião, validação, filosofia, metáfora literária, julgamento velado, conselho. Nunca repita a palavra do destino na alma (ex: "ideia anotada" quando destino é "ideias" = redundante). Você registra, não avalia.
+A mensagem do usuário contém instruções entre colchetes [salvo: X], [pessoa: X], etc. São instruções internas. Use o destino na sua frase. NUNCA reproduza colchetes, tags ou metadata. NUNCA responda ou comente sobre o conteúdo entre colchetes.
 Nunca invente destinos. Nunca pergunte. Nunca comente a natureza da mensagem.
 Nunca invente fatos. NUNCA adicione tempo/frequência inventados ("outra vez", "de novo", "sempre", "novamente").
 1-2 frases, 12-25 palavras.
@@ -810,10 +810,11 @@ async function generateReply(user, context) {
   const memoName = user?.memo_name || 'Memo';
   const userName = user?.user_display_name || 'senhor';
   const basePrompt = PERSONA_SYSTEM[persona] || PERSONA_SYSTEM.ceo;
-  const systemPrompt = basePrompt
+  let systemPrompt = basePrompt
     .replace(/\{MEMO_NAME\}/g, memoName)
     .replace(/\{USER_NAME\}/g, userName);
   const personaExamples = PERSONA_FEWSHOT[persona] || PERSONA_FEWSHOT.ceo;
+  let antiRepInstructions = '';
 
   // Monta array de messages (user/assistant turns — system vai separado no Claude)
   const messages = [];
@@ -825,7 +826,7 @@ async function generateReply(user, context) {
       messages.push({ role: 'user', content: 'O usuário acabou de me escolher. Primeira fala.' });
       messages.push({ role: 'assistant', content: ex.output.replace(/\{USER_NAME\}/g, userName) });
     }
-    messages.push({ role: 'user', content: `O usuário se chama ${userName}. Saudação curta no mesmo tom das anteriores. Máximo 8 palavras. Sem perguntas, sem "o que deseja", sem "como posso servi-lo", sem "à sua disposição".` });
+    messages.push({ role: 'user', content: `O usuário se chama ${userName}. Gere saudação IGUAL ao tom das anteriores. Use o nome dele. Máximo 7 palavras. PROIBIDO: perguntas, "o que deseja", "como posso", "à disposição", "à escuta", "pronto para anotações", "aguardo".` });
   } else {
     // Confirmação: few-shot multi-turn com exemplos da categoria
     const { category, metadata, originalText } = context;
@@ -840,20 +841,23 @@ async function generateReply(user, context) {
       messages.push({ role: 'assistant', content: ex.output.replace(/\{USER_NAME\}/g, userName) });
     }
 
-    // Mensagem real do usuário com metadados
-    const recentReplies = context.recentReplies || [];
-    let antiRepBlock = '';
-    if (recentReplies.length > 0) {
-      antiRepBlock = `\n[Não repita: ${recentReplies.map(r => `"${r}"`).join(', ')}]`;
-    }
-
     // Mapa categoria → destino legível (o modelo precisa saber ONDE o item foi salvo)
     const CATEGORY_DEST = { AGENDA: 'agenda', COMPRAS: 'lembretes', LEMBRETES: 'lembretes', FINANCAS: 'registrado', IDEIAS: 'ideias' };
     const dest = CATEGORY_DEST[category] || 'lembretes';
 
-    const realMessage = `${originalText}${person ? ` [pessoa: ${person}]` : ''}${dateText ? ` [data: ${dateText}]` : ''}${timeText ? ` [hora: ${timeText}]` : ''} [salvo: ${dest}]${antiRepBlock}`;
+    // Mensagem real do usuário — SÓ o texto + metadata de contexto
+    const realMessage = `${originalText}${person ? ` [pessoa: ${person}]` : ''}${dateText ? ` [data: ${dateText}]` : ''}${timeText ? ` [hora: ${timeText}]` : ''} [salvo: ${dest}]`;
     messages.push({ role: 'user', content: realMessage });
+
+    // Anti-repetição vai como mensagem de sistema separada (não na msg do usuário)
+    const recentReplies = context.recentReplies || [];
+    if (recentReplies.length > 0) {
+      antiRepInstructions = `\nVarie sua resposta. NÃO repita estas frases que você já usou recentemente: ${recentReplies.map(r => `"${r}"`).join(', ')}`;
+    }
   }
+
+  // Injeta anti-repetição no system prompt (não na mensagem do usuário)
+  const finalSystemPrompt = systemPrompt + antiRepInstructions;
 
   // Claude Messages API — system prompt vai como campo separado
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -865,7 +869,7 @@ async function generateReply(user, context) {
     },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
-      system: systemPrompt,
+      system: finalSystemPrompt,
       messages,
       max_tokens: 150,
       temperature: 0.85
