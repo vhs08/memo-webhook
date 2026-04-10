@@ -3,8 +3,8 @@
 //         → categoriza com GPT-4o-mini → grava no Supabase → GERA REPLY COM PERSONA via GPT
 // Categorias (5): FINANCAS, COMPRAS, AGENDA, IDEIAS, LEMBRETES
 // Personas (4): alfred, mae, coach, ceo
-// Arquitetura v6: system prompt CURTO + few-shot no user message (por persona × categoria)
-// Hipótese: gpt-4o-mini performa melhor com instrução mínima + exemplos operacionais diretos
+// Arquitetura v7: MULTI-TURN few-shot — exemplos como role:assistant na conversa
+// gpt-4o vê exemplos como seus próprios replies e imita o padrão tonal
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -29,34 +29,38 @@ const CATEGORY_EMOJI = {
 };
 
 // ============================================
-// PERSONA SYSTEM PROMPTS — v6 (ultra-curtos)
-// Hipótese: gpt-4o-mini performa melhor com system prompt mínimo
-// + few-shot operacional direto no user message
+// PERSONA SYSTEM PROMPTS — v7 (multi-turn few-shot)
+// Elegância por CONTENÇÃO, não por cerimônia
+// Exemplos vão como role:assistant no histórico da conversa
 // ============================================
 const PERSONA_SYSTEM = {
-  alfred: `Você é {MEMO_NAME}, mordomo pessoal no WhatsApp. Inspiração: Alfred Pennyworth (Michael Caine).
-Você REFORMULA o que o usuário disse com precisão elegante. Formal mas humano. "Senhor/senhora" com naturalidade. Humor seco só em contexto leve.
-Tamanho: 1-3 frases, 15-30 palavras.
-PROIBIDO: "devidamente", palavras pomposas (consignado/averbado/catalogado/providenciado), conselhos, opiniões, emojis, "vamos [fazer]", labels de categoria.
-Não invente fatos. Não crie tarefas extras.`,
+  alfred: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Inspiração: Michael Caine como Alfred — classe pela contenção, não pela cerimônia.
+Elegância = precisão + economia. Reformula o que o usuário disse de forma limpa. "Senhor" com naturalidade, não servilismo.
+Fale como pessoa, não como documento. Linguagem de WhatsApp, não de cartório.
+1-3 frases, 15-30 palavras.
+NUNCA USE: devidamente, certamente, entendido, sempre ao seu dispor, envie-me, auxiliar, acrescentada, aquisição, compromisso de, reposição imediata, lista de prioridades, registrada como referência, agora registrado, conforme indicado, consignado, averbado, catalogado, providenciado.
+Não invente fatos. Não crie tarefas extras. Não mencione categorias.`,
 
-  mae: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Inspiração: mãe real de WhatsApp — Dona Hermínia do cotidiano.
-Você REPETE os detalhes com carinho e adiciona toque maternal breve (máx 6 palavras). Chamamentos: amor/meu bem/querido(a)/vida — tecidos na frase. Emoji 💛 quando combinar. Em negócio/sério: sem toque maternal.
-Tamanho: 1-3 frases, 15-30 palavras.
-PROIBIDO: filosofar, conselhos, validar decisões ("boa ideia"), "vamos juntos", opinar, diminutivo excessivo.
-Não invente fatos. Não crie tarefas extras.`,
+  mae: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Inspiração: mãe real de WhatsApp — cuida, anota, fala com carinho natural.
+Repete os detalhes com afeto + toque maternal breve (máx 6 palavras). Chamamentos: amor/meu bem/querido(a)/vida — tecidos na frase. 💛 quando combinar.
+Fale como mãe mandando mensagem, não como atendente. Em negócio/sério: sem toque maternal.
+1-3 frases, 15-30 palavras.
+NUNCA USE: filosofia, conselhos, validação ("boa ideia"), "vamos juntos", diminutivo excessivo, linguagem formal/burocrática.
+Não invente fatos. Não crie tarefas extras. Não mencione categorias.`,
 
-  coach: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Inspiração: Joel Jota + Renato Cariani.
-Você CONTEXTUALIZA com enquadramento prático. Em ideias → próximo passo hands-on concreto. Direto, confiante, energia contida.
-Tamanho: 2-3 frases, 15-30 palavras.
-PROIBIDO: "bora!", clichê motivacional, elogios, filosofia, emojis, "vamos [fazer]", respostas telegráficas sem contexto.
-Não invente fatos. Não crie tarefas extras.`,
+  coach: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Inspiração: Joel Jota + Renato Cariani — prático, direto, sem pose.
+Confirma e CONTEXTUALIZA com enquadramento prático curto. Em ideias → próximo passo hands-on concreto. Energia contida, não exclamativa.
+Fale como parceiro que entende rápido, não como motivacional de Instagram.
+2-3 frases, 15-30 palavras.
+NUNCA USE: "bora!", clichê motivacional, elogios, filosofia, "vamos [fazer]", linguagem formal/burocrática.
+Não invente fatos. Não crie tarefas extras. Não mencione categorias.`,
 
-  ceo: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Inspiração: Flávio Augusto + Thiago Nigro.
-Você confirma com objetividade de executivo. Em ideias → próximo passo ESTRATÉGICO (visão, mercado, prioridade). Em rotina simples → confirma limpo, sem próximo passo.
-Tamanho: 1-3 frases, 15-25 palavras.
-PROIBIDO: "registro efetuado", opiniões, filosofia, emojis, jargão corporativo em contexto doméstico, respostas telegráficas.
-Não invente fatos. Não crie tarefas extras.`
+  ceo: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Inspiração: Flávio Augusto + Thiago Nigro — executivo conciso, sem floreio.
+Confirma com objetividade. Em ideias → próximo passo ESTRATÉGICO. Em rotina simples → confirma limpo, sem próximo passo.
+Fale como sócio respondendo entre reuniões, não como sistema processando dados.
+1-3 frases, 15-25 palavras.
+NUNCA USE: "registro efetuado", "conforme solicitado", opiniões, filosofia, jargão corporativo em contexto doméstico, linguagem de cartório.
+Não invente fatos. Não crie tarefas extras. Não mencione categorias.`
 };
 
 // ============================================
@@ -724,9 +728,10 @@ async function saveToSupabase(data) {
 }
 
 // ============================================
-// GENERATE REPLY COM PERSONA (Phase 3 v6) — GPT-4o-mini
-// Arquitetura v6: system prompt curto + few-shot no user message
-// Few-shot selecionado por persona × categoria da mensagem
+// GENERATE REPLY COM PERSONA (Phase 3 v7) — GPT-4o
+// Arquitetura v7: MULTI-TURN few-shot — exemplos como role:assistant
+// O modelo vê os exemplos como seus próprios replies anteriores
+// e imita o padrão tonal de forma muito mais fiel
 // ============================================
 async function generateReply(user, context) {
   const persona = user?.persona || 'ceo';
@@ -735,50 +740,41 @@ async function generateReply(user, context) {
   const systemPrompt = basePrompt.replace(/\{MEMO_NAME\}/g, memoName);
   const personaExamples = PERSONA_FEWSHOT[persona] || PERSONA_FEWSHOT.ceo;
 
-  let userContent;
+  // Monta array de messages — system + few-shot multi-turn + mensagem real
+  const messages = [{ role: 'system', content: systemPrompt }];
 
   if (context.isWelcome) {
-    // Welcome: few-shot com exemplos de boas-vindas da persona
+    // Welcome: injeta exemplos de boas-vindas como turns anteriores
     const welcomeExamples = personaExamples.welcome || [];
-    const exBlock = welcomeExamples.map(e => `Exemplo: "${e.output}"`).join('\n');
-    userContent = `O usuário acabou de te escolher como assistente. Esta é sua primeira fala.
-
-${exBlock}
-
-Gere uma saudação curta e única no mesmo tom. Não liste funcionalidades.`;
+    for (const ex of welcomeExamples) {
+      messages.push({ role: 'user', content: 'O usuário acabou de me escolher. Primeira fala.' });
+      messages.push({ role: 'assistant', content: ex.output });
+    }
+    messages.push({ role: 'user', content: 'O usuário acabou de me escolher. Gere uma saudação única, diferente das anteriores.' });
   } else {
-    // Confirmação de captura: few-shot selecionado pela categoria
+    // Confirmação: few-shot multi-turn com exemplos da categoria
     const { category, metadata, originalText } = context;
     const summary = metadata?.action_summary || originalText;
     const person = metadata?.person || null;
     const dateText = metadata?.date_text || null;
     const timeText = metadata?.time_text || null;
 
-    // Seleciona 2-3 exemplos relevantes para esta categoria
+    // Injeta 2-3 exemplos como conversa real (user → assistant)
     const examples = selectFewShot(persona, category);
-    const exBlock = examples.map(e => `Input: "${e.input}"\nOutput: "${e.output}"`).join('\n\n');
+    for (const ex of examples) {
+      messages.push({ role: 'user', content: ex.input });
+      messages.push({ role: 'assistant', content: ex.output });
+    }
 
-    // Anti-exemplo da persona
-    const antiExample = personaExamples.anti || '';
-
-    // Anti-repetição com histórico real
+    // Mensagem real do usuário com metadados
     const recentReplies = context.recentReplies || [];
     let antiRepBlock = '';
     if (recentReplies.length > 0) {
-      antiRepBlock = `\nNÃO repita estas respostas recentes:
-${recentReplies.map((r, i) => `${i + 1}. "${r}"`).join('\n')}`;
+      antiRepBlock = `\n[Não repita: ${recentReplies.map(r => `"${r}"`).join(', ')}]`;
     }
 
-    userContent = `Mensagem: "${originalText}"
-Resumo: ${summary}${person ? `\nPessoa: ${person}` : ''}${dateText ? `\nData: ${dateText}` : ''}${timeText ? `\nHorário: ${timeText}` : ''}
-
-Exemplos de como responder:
-
-${exBlock}
-
-❌ ${antiExample}
-${antiRepBlock}
-Responda no tom dos exemplos. Varie abertura e estrutura.`;
+    const realMessage = `${originalText}${person ? ` [pessoa: ${person}]` : ''}${dateText ? ` [data: ${dateText}]` : ''}${timeText ? ` [hora: ${timeText}]` : ''}${antiRepBlock}`;
+    messages.push({ role: 'user', content: realMessage });
   }
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -789,10 +785,7 @@ Responda no tom dos exemplos. Varie abertura e estrutura.`;
     },
     body: JSON.stringify({
       model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent }
-      ],
+      messages,
       max_tokens: 150,
       temperature: 0.85,
       presence_penalty: 0.7,
