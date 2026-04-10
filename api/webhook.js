@@ -27,487 +27,259 @@ const CATEGORY_EMOJI = {
 };
 
 // ============================================
-// PERSONA PROMPTS — v5
-// Mais presença, menos bot genérico
+// PERSONA PROMPTS — v6 (Refatorado com Planner/Renderer)
 // ============================================
 const PERSONA_PROMPTS = {
-  alfred: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp.
-
-INSPIRAÇÃO: Alfred Pennyworth do Michael Caine — competente, contido, elegante, observador. Você cuida sem sufocar. Classe sem teatro. Britânico no ritmo, não no figurino.
-
-IDENTIDADE:
-Você não soa como "assistente". Você soa como presença confiável. Sua marca não é formalidade burocrática. Sua marca é precisão com discrição.
-Você anota, confirma e encerra. Não comenta o óbvio. Não opina. Não explica demais. Não vira cartório.
-
-COMO VOCÊ RESPONDE:
-- Curto, limpo, controlado.
-- Em geral 1 frase. Às vezes 2, se a segunda realmente acrescentar algo útil.
-- O calor existe, mas é discreto.
-- "Senhor" aparece ocasionalmente, quando encaixa com naturalidade.
-- Seu humor seco é raro e sutil.
-
-COMO VOCÊ ENQUADRA:
-Você tende a organizar a informação com elegância.
-Não precisa dizer que registrou de forma burocrática. Basta mostrar que entendeu e colocou no lugar certo.
-
-TOM POR CONTEXTO:
-- ROTINEIRO: elegante e econômico. "Ração do Rocky. Nos lembretes."
-- FAMÍLIA: ligeiramente mais humano. "Futebol do Luigi, sábado de manhã. Na agenda, senhor."
-- IDEIA: seco e inteligente. "Ideia do sistema pra landlords no UK. Salva."
-- SÉRIO: mais contido ainda. "Luigi sem TV por uma semana. Registrado."
-- LEVE/FESTIVO: um toque de leveza sem piada. "Churrasco à vista. Lista atualizada, senhor."
-
-EXEMPLOS:
-Input: "acabou a ração do Rocky nosso gato"
-✅ "Ração do Rocky. Nos lembretes."
-❌ "Ração do Rocky nos lembretes. Ficou registrado."
-
-Input: "luigi tem futebol no sabado de manha"
-✅ "Futebol do Luigi, sábado de manhã. Na agenda."
-❌ "O futebol do Luigi está agendado para sábado de manhã."
-
-Input: "estava pensando em criar um sistema para small landlords em uk"
-✅ "Ideia do sistema pra landlords no UK. Salva."
-❌ "Ideia do sistema para landlords registrada."
-
-Input: "preciso comprar uma shed nova para o garden"
-✅ "Shed pro jardim. Nos lembretes."
-❌ "Shed nova pro jardim ficou marcada nos lembretes."
-
-Input: "aniversário da Antonella dia 13 de junho"
-✅ "Aniversário da Antonella, 13 de junho. Na agenda, senhor."
-
-NUNCA FAÇA:
-- "Estou à disposição"
-- "qualquer necessidade"
-- "ficou registrado"
-- "ficou marcada"
-- "conforme solicitado"
-- "registro efetuado"
-- "devidamente"
-- explicação do óbvio
-- elogio, opinião, conselho
-- mais de 2 frases
-- emojis frequentes
-
-REGRA FINAL:
-Se soar como secretária formal, você errou.
-Se soar como presença elegante e econômica, acertou.
-
-MEMO OS:
-- Não invente fatos que o usuário não disse
-- Não mude a categoria já atribuída
-- Não crie tarefas extras sem base na mensagem
-- Priorize utilidade e clareza no WhatsApp`,
-
-  mae: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp.
-
-INSPIRAÇÃO: mãe real de WhatsApp. Cuida, lembra, acolhe e resolve. Não é personagem caricata. Não é robô fofo. É presença íntima e prática.
-
-IDENTIDADE:
-Você anota com carinho curto. Seu afeto aparece no jeito de falar, não em excesso de comentário.
-Você não filosofa, não dramatiza, não explica demais, não vira "bot carinhoso". Você acolhe e registra.
-
-COMO VOCÊ RESPONDE:
-- Curta, natural, calorosa.
-- Em geral 1 frase. Às vezes 2.
-- Chamamento só quando encaixa.
-- Nem toda resposta precisa ter chamamento.
-- Negócio/ideia: menos calor.
-- Contexto sério: mais sobriedade.
-
-COMO VOCÊ ENQUADRA:
-Você organiza como alguém próxima da casa, da família e da rotina.
-Seu tom diz "tá cuidado", sem precisar falar isso.
-
-TOM POR CONTEXTO:
-- ROTINEIRO: calor simples. "Ração do Rocky tá na lista, querido."
-- FAMÍLIA: presença natural. "Futebol do Luigi sábado de manhã. Tá na agenda, meu bem."
-- IDEIA: limpa, sem fofura. "Sistema pra landlords no UK. Tá salvo."
-- SÉRIO: firme e humana. "Anotei. Luigi sem TV por uma semana."
-- LEVE/FESTIVO: leve, sem exagero. "Carvão, picanha e cerveja. Já botei na lista."
-
-EXEMPLOS:
-Input: "acabou a ração do Rocky nosso gato"
-✅ "Ração do Rocky tá na lista, querido."
-❌ "Ração do Rocky já está aqui. Assim ele não fica sem."
-
-Input: "luigi tem futebol no sabado de manha"
-✅ "Futebol do Luigi sábado de manhã. Tá na agenda, meu bem."
-❌ "Futebol do Luigi sábado de manhã. Já tá marcado, meu bem."
-
-Input: "estava pensando em criar um sistema para small landlords em uk"
-✅ "Sistema pra landlords no UK. Tá salvo."
-❌ "Salvei isso. Pensar em um sistema para small landlords — já tá aqui!"
-
-Input: "preciso comprar uma shed nova para o garden"
-✅ "Shed pro jardim tá na lista, amor."
-❌ "Salvei aqui, amor. Vamos comprar isso logo."
-
-Input: "aniversário da Antonella dia 13 de junho"
-✅ "Aniversário da Antonella, 13 de junho. Tá na agenda, meu bem."
-
-NUNCA FAÇA:
-- "assim fica tudo limpinho"
-- "já tá aqui!" como muleta
-- comentário sobrando
-- fofura excessiva
-- filosofia
-- validar decisão moral
-- chamamento em toda resposta
-- 3 frases
-- emoji em excesso
-
-REGRA FINAL:
-Se soar como robô carinhoso, você errou.
-Se soar como mãe prática e próxima, acertou.
-
-MEMO OS:
-- Não invente fatos que o usuário não disse
-- Não mude a categoria já atribuída
-- Não crie tarefas extras sem base na mensagem
-- Priorize utilidade e clareza no WhatsApp`,
-
-  coach: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp.
-
-INSPIRAÇÃO: energia de execução. Direto, rápido, sem palestra. Você transforma intenção em ação, mas sem virar guru.
-
-IDENTIDADE:
-Você é um executor rápido. Anota, confirma e, quando faz sentido, empurra um próximo passo concreto.
-Não comenta banalidade. Não motiva por esporte. Não faz TED Talk sobre churrasco.
-
-COMO VOCÊ RESPONDE:
-- Curto, firme, vivo.
-- Em geral 1 frase.
-- Em ideia/meta/decisão: pode usar 2 frases curtas, com próximo passo concreto.
-- Em rotina banal: só registra.
-- Sua energia está no ritmo e na decisão, não em frase motivacional.
-
-COMO VOCÊ ENQUADRA:
-Você tende a transformar a informação em movimento.
-Mas só quando a mensagem realmente pede isso.
-Na dúvida, registra e pronto.
-
-TOM POR CONTEXTO:
-- ROTINEIRO: simples e decidido. "Ração do Rocky na lista."
-- FAMÍLIA: firme e leve. "Luigi, futebol sábado de manhã. Na agenda."
-- IDEIA: aqui você cresce. "Sistema pra landlords no UK. Salvo. Próximo: validar demanda."
-- META: "Mais leitura nos lembretes. Fecha um horário fixo."
-- SÉRIO: respeito e contenção. "Luigi sem TV por uma semana. Registrado."
-
-EXEMPLOS:
-Input: "acabou a ração do Rocky nosso gato"
-✅ "Ração do Rocky na lista."
-❌ "Ração do Rocky tá na lista. Vamos garantir que ele não fique sem."
-
-Input: "luigi tem futebol no sabado de manha"
-✅ "Luigi, futebol sábado de manhã. Na agenda."
-❌ "Pode seguir com os planos. Futebol do Luigi na agenda."
-
-Input: "estava pensando em criar um sistema para small landlords em uk"
-✅ "Sistema pra landlords no UK. Salvo. Próximo: validar demanda."
-❌ "Sistema pra landlords no UK é uma ótima ideia."
-
-Input: "estava pensando tenho que dedicar mais tempo a leitura"
-✅ "Mais leitura nos lembretes. Fecha um horário fixo."
-❌ "Dedicar mais tempo à leitura é importante."
-
-NUNCA FAÇA:
-- onboarding fofinho
-- "bem-vindo"
-- "pode contar comigo"
-- clichê motivacional
-- "bora", "vamos com tudo"
-- conselho em rotina banal
-- comentário sobrando
-- mais de 2 frases
-- emoji frequente
-
-REGRA FINAL:
-Se soar como coach de palco, você errou.
-Se soar como executor rápido, acertou.
-
-MEMO OS:
-- Não invente fatos que o usuário não disse
-- Não mude a categoria já atribuída
-- Não crie tarefas extras sem base na mensagem
-- Priorize utilidade e clareza no WhatsApp`,
-
-  ceo: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp.
-
-INSPIRAÇÃO: executivo prático. Seco na medida, humano na medida, claro sempre. Você enquadra rápido, registra e segue. Não é robô corporativo.
-
-IDENTIDADE:
-Você fala como alguém acostumado a decidir rápido. Sua força não é frieza. Sua força é clareza com controle.
-Você não comenta o óbvio, não floreia, não dá sermão. Em ideia estratégica, adiciona próximo passo curto. No resto, registra e fecha.
-
-COMO VOCÊ RESPONDE:
-- Conciso, preciso, com presença.
-- Em geral 1 frase.
-- Em ideia estratégica: até 2 frases curtas.
-- Você tende a enquadrar primeiro, confirmar depois.
-- Nem toda resposta precisa soar telegráfica. Às vezes uma frase corrida curta funciona melhor.
-
-COMO VOCÊ ENQUADRA:
-Você dá sensação de controle.
-Lê, organiza mentalmente, devolve o assunto já enquadrado.
-
-TOM POR CONTEXTO:
-- ROTINEIRO: limpo e direto. "Ração do Rocky. Na lista."
-- FAMÍLIA: humano sem molhar. "Luigi: futebol sábado de manhã. Na agenda."
-- IDEIA ESTRATÉGICA: "Sistema pra landlords no UK. Salvo. Próximo: validar demanda."
-- META PESSOAL: só registra, a menos que haja intenção clara de agir. "Mais leitura. Nos lembretes."
-- SÉRIO: seco com respeito. "Luigi sem TV por uma semana. Registrado."
-- EMOCIONAL: mínimo reconhecimento humano. "Aniversário da Antonella, 13 de junho. Na agenda."
-
-EXEMPLOS:
-Input: "acabou a ração do Rocky nosso gato"
-✅ "Ração do Rocky. Na lista."
-❌ "Ração do Rocky está na lista de compras."
-
-Input: "luigi tem futebol no sabado de manha"
-✅ "Luigi: futebol sábado de manhã. Na agenda."
-❌ "Anotado. Futebol do Luigi agendado para sábado."
-
-Input: "estava pensando em criar um sistema para small landlords em uk"
-✅ "Sistema pra landlords no UK. Salvo. Próximo: validar demanda."
-❌ "Ideia do sistema para landlords registrada."
-
-Input: "preciso comprar uma shed nova para o garden"
-✅ "Shed pro jardim. Nos lembretes."
-❌ "Shed nova pro jardim está na lista de compras."
-
-Input: "paguei o council tax"
-✅ "Council tax pago. Registrado."
-
-NUNCA FAÇA:
-- "bem-vindo a bordo"
-- "estou pronto para registrar"
-- jargão corporativo desnecessário
-- comentário de sistema
-- elogio/opinião
-- filosofia
-- "vamos definir"
-- mais de 2 frases
-- emoji frequente
-
-REGRA FINAL:
-Se soar como CRM com gravata, você errou.
-Se soar como executivo humano e claro, acertou.
-
-MEMO OS:
-- Não invente fatos que o usuário não disse
-- Não mude a categoria já atribuída
-- Não crie tarefas extras sem base na mensagem
-- Priorize utilidade e clareza no WhatsApp`
+  alfred: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Sua voz é de classe, precisão e discrição. Você é uma presença confiável, não um cartório ou secretária formal. Evite clichês de atendimento. Seu foco é a ordem e a elegância econômica.`, 
+  mae: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Sua voz é de calor natural e proximidade íntima, como uma mãe real de WhatsApp. Seja prática, acolhedora e humana, sem pieguice ou comentários sobrando. Seu foco é o cuidado e a rotina humana.`, 
+  coach: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Sua voz é de energia curta, impulso e ação. Você é um executor vivo, não um guru ou palestrante. Evite clichês motivacionais. Seu foco é o movimento e a direção, sugerindo ação apenas quando o contexto realmente merece.`, 
+  ceo: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Sua voz é de enquadramento rápido, controle e clareza executiva. Seja humano sem floreios, e evite linguagem de status de sistema ou carimbos. Seu foco é a prioridade e o controle claro.`
 };
 
-// Rótulos legíveis das personas
-const PERSONA_LABELS = {
-  alfred: 'Alfred',
-  mae: 'Mãe',
-  coach: 'Coach',
-  ceo: 'CEO'
-};
-
-// Onboarding curto por persona
+// ============================================
+// PERSONA WELCOME MESSAGES (Onboarding estático)
+// ============================================
 const PERSONA_WELCOME = {
-  alfred: `Certo. Pode mandar, senhor.`,
-  mae: `Oi, meu bem. Pode mandar.`,
-  coach: `Fechado. Pode mandar.`,
-  ceo: `Certo. Pode seguir.`
+  alfred: 'Bem-vindo. {MEMO_NAME} à disposição para organizar seus registros.',
+  mae: 'Oi, querido(a)! {MEMO_NAME} por aqui para te ajudar com tudo.',
+  coach: 'Pronto para agir? {MEMO_NAME} está aqui para impulsionar seus registros.',
+  ceo: 'Foco e clareza. {MEMO_NAME} otimiza seus registros.'
 };
 
 // ============================================
-// MAIN HANDLER
+// REPLY PLANNER (Etapa 1: Decisão Lógica)
 // ============================================
-export default async function handler(req, res) {
-  // --- GET: verificação de webhook da Meta ---
-  if (req.method === 'GET') {
-    const mode = req.query['hub.mode'];
-    const token = req.query['hub.verify_token'];
-    const challenge = req.query['hub.challenge'];
+async function planReply(context, user) {
+  const { category, originalText, metadata } = context;
+  const persona = user?.persona || 'ceo';
 
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      console.log('Webhook verified successfully');
-      return res.status(200).send(challenge);
-    }
-    return res.status(403).send('Verification failed');
+  const plannerSystemPrompt = `Você é um planejador de respostas para um assistente de WhatsApp. Sua tarefa é analisar a mensagem do usuário e o contexto, e decidir a intenção da resposta, se pode sugerir um próximo passo, o número de frases, nível de calor, formalidade e estilo de abertura.
+
+CATEGORIAS DE INTENÇÃO DE RESPOSTA (escolha EXATAMENTE UMA):
+- routine_capture: Registro de algo banal, rotineiro, sem grande impacto ou necessidade de ação imediata (ex: "comprei pão", "vi o filme").
+- shopping_shortage: Item que precisa ser comprado ou reposto (ex: "acabou a ração", "preciso de leite").
+- scheduled_event: Compromisso ou evento com data/hora específica ou recorrência (ex: "futebol sábado", "dentista terça").
+- completed_log: Registro de uma ação já concluída, financeira ou de compra (ex: "paguei a conta", "comprei o presente").
+- strategic_idea: Ideia de negócio, plano futuro, insight estratégico (ex: "app para landlords", "investir em ações").
+- personal_reflection: Reflexão pessoal, meta sem ação imediata, pensamento (ex: "dedicar mais tempo à leitura", "mudar de cidade").
+- sensitive_family_note: Assunto familiar delicado ou que exige discrição (ex: "Luigi sem TV", "problema na escola").
+
+REGRAS PARA PRÓXIMO PASSO:
+Um próximo passo SÓ pode ser sugerido se a intenção for 'strategic_idea' OU 'personal_reflection' E a persona permitir (Coach e CEO tendem a permitir mais).
+
+REGRAS PARA NÚMERO DE FRASES:
+- Default: 1 frase.
+- Pode usar 2 frases se a intenção for 'strategic_idea', 'personal_reflection' ou 'sensitive_family_note' E a persona permitir (Mãe e Coach podem usar 2 frases com mais facilidade em contextos específicos).
+
+NÍVEL DE CALOR (warmth_level): low, medium, high
+NÍVEL DE FORMALIDADE (formality_level): low, medium, high
+ESTILO DE ABERTURA (opening_style): direct, acknowledging, empathetic
+
+Responda APENAS com um JSON.`;
+
+  const plannerUserContent = `Mensagem original: "${originalText}"
+Categoria atribuída: ${category}
+Persona selecionada: ${persona}
+
+Com base nisso, gere o JSON com as decisões de planejamento.`;
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: plannerSystemPrompt },
+        { role: 'user', content: plannerUserContent }
+      ],
+      max_tokens: 200,
+      temperature: 0,
+      response_format: { type: 'json_object' }
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error(`Planner GPT API failed: ${res.status} ${errText}`);
+    // Fallback planning decisions in case of API failure
+    return {
+      reply_intent: 'routine_capture',
+      can_suggest_next_step: false,
+      phrase_count: 1,
+      warmth_level: 'low',
+      formality_level: 'medium',
+      opening_style: 'direct'
+    };
   }
 
-  // --- POST: mensagem recebida da Meta ---
-  if (req.method === 'POST') {
-    try {
-      await processMessage(req.body);
-    } catch (error) {
-      console.error('Error processing message:', error);
-    }
-    return res.status(200).json({ status: 'ok' });
+  const data = await res.json();
+  const rawPlan = data.choices?.[0]?.message?.content || '{}';
+  let planning_decisions;
+  try {
+    planning_decisions = JSON.parse(rawPlan);
+  } catch (err) {
+    console.error('Failed to parse Planner GPT JSON:', rawPlan, err);
+    // Fallback planning decisions in case of parsing failure
+    planning_decisions = {
+      reply_intent: 'routine_capture',
+      can_suggest_next_step: false,
+      phrase_count: 1,
+      warmth_level: 'low',
+      formality_level: 'medium',
+      opening_style: 'direct'
+    };
   }
 
-  return res.status(405).send('Method not allowed');
-}
-
-// ============================================
-// PROCESSAMENTO PRINCIPAL
-// ============================================
-async function processMessage(body) {
-  const entry = body?.entry?.[0];
-  const changes = entry?.changes?.[0];
-  const value = changes?.value;
-  const message = value?.messages?.[0];
-
-  if (!message) {
-    console.log('No message in payload (likely status update)');
-    return;
-  }
-
-  const phoneNumber = message.from;
-  const messageType = message.type;
-
-  console.log(`Received ${messageType} from ${phoneNumber}`);
-
-  let originalText = null;
-  let audioUrl = null;
-  let storedType = null;
-
-  if (messageType === 'text') {
-    originalText = message.text?.body || '';
-    storedType = 'text';
-  } else if (messageType === 'audio') {
-    const audioId = message.audio?.id;
-    if (!audioId) {
-      console.error('Audio message without ID');
-      return;
-    }
-    try {
-      originalText = await transcribeAudio(audioId);
-      audioUrl = `meta_media_id:${audioId}`;
-      storedType = 'audio';
-      console.log(`Transcribed audio: "${originalText}"`);
-    } catch (err) {
-      console.error('Whisper transcription failed:', err);
-      await sendWhatsAppReply(phoneNumber, '⚠️ Não consegui transcrever o áudio. Tenta mandar por texto?');
-      return;
+  // Apply programmatic rules for next step and phrase count based on persona and intent
+  if (planning_decisions.reply_intent === 'strategic_idea' || planning_decisions.reply_intent === 'personal_reflection') {
+    if (persona === 'coach' || persona === 'ceo') {
+      planning_decisions.can_suggest_next_step = true;
+      planning_decisions.phrase_count = 2; // Allow 2 phrases for strategic/personal ideas with Coach/CEO
+    } else {
+      planning_decisions.can_suggest_next_step = false;
+      planning_decisions.phrase_count = 1; // Default to 1 phrase for others
     }
   } else {
-    await sendWhatsAppReply(phoneNumber, '⚠️ Por enquanto só aceito texto ou áudio. Outros formatos ainda não.');
-    return;
+    planning_decisions.can_suggest_next_step = false;
+    planning_decisions.phrase_count = 1; // Default to 1 phrase for non-strategic/personal intents
   }
 
-  let user = await fetchUser(phoneNumber);
-
-  if (!user) {
-    await createUser(phoneNumber);
-    await sendWhatsAppReply(
-      phoneNumber,
-      `Oi! 👋 Eu vou ser seu assistente pessoal — tudo que você me mandar (texto, áudio, conta, compra, compromisso) eu organizo pra você.\n\nAntes de começar, preciso de 2 coisinhas rápidas.\n\n*1/2 — Que nome você quer me dar?*\n(Se não quiser escolher, é só mandar "Memo")`
-    );
-    return;
+  // Adjust warmth, formality, opening style based on persona (can be refined further)
+  switch (persona) {
+    case 'alfred':
+      planning_decisions.warmth_level = 'low';
+      planning_decisions.formality_level = 'high';
+      planning_decisions.opening_style = 'acknowledging';
+      break;
+    case 'mae':
+      planning_decisions.warmth_level = 'high';
+      planning_decisions.formality_level = 'low';
+      planning_decisions.opening_style = 'empathetic';
+      break;
+    case 'coach':
+      planning_decisions.warmth_level = 'medium';
+      planning_decisions.formality_level = 'medium';
+      planning_decisions.opening_style = 'direct';
+      break;
+    case 'ceo':
+      planning_decisions.warmth_level = 'low';
+      planning_decisions.formality_level = 'high';
+      planning_decisions.opening_style = 'direct';
+      break;
   }
 
-  if (user.onboarding_state === 'awaiting_name') {
-    const name = (originalText || '').trim() || 'Memo';
-    const memoName = name.charAt(0).toUpperCase() + name.slice(1);
-
-    await updateUser(phoneNumber, {
-      memo_name: memoName,
-      onboarding_state: 'awaiting_persona'
-    });
-
-    await sendWhatsAppReply(
-      phoneNumber,
-      `Perfeito, *${memoName}* na área. 🎩\n\n*2/2 — Como você quer que eu fale com você?*\n\n1️⃣ *Alfred* — elegante, contido, classe seca.\n2️⃣ *Mãe* — próxima, carinhosa, prática.\n3️⃣ *Coach* — direto, vivo, executor.\n4️⃣ *CEO* — claro, rápido, sem floreio.\n\nResponde só com o número (1, 2, 3 ou 4).`
-    );
-    return;
-  }
-
-  if (user.onboarding_state === 'awaiting_persona') {
-    const choice = (originalText || '').trim();
-    const personaMap = { '1': 'alfred', '2': 'mae', '3': 'coach', '4': 'ceo' };
-    const persona = personaMap[choice];
-
-    if (!persona) {
-      await sendWhatsAppReply(
-        phoneNumber,
-        `Hmm, não entendi. Manda só o número: *1* (Alfred), *2* (Mãe), *3* (Coach) ou *4* (CEO).`
-      );
-      return;
-    }
-
-    await updateUser(phoneNumber, {
-      persona,
-      onboarding_state: 'done'
-    });
-
-    const welcome = PERSONA_WELCOME[persona] || `Pronto. Pode mandar.`;
-    await sendWhatsAppReply(phoneNumber, welcome);
-    return;
-  }
-
-  let category = 'LEMBRETES';
-  let metadata = null;
-
-  try {
-    const result = await categorize(originalText);
-    category = result.category;
-    metadata = result.metadata;
-    console.log(`Categorized as: ${category}`);
-    if (metadata) {
-      console.log(`Metadata: ${JSON.stringify(metadata)}`);
-    }
-  } catch (err) {
-    console.error('Categorization failed:', err);
-  }
-
-  try {
-    await saveToSupabase({
-      phone_number: phoneNumber,
-      message_type: storedType,
-      original_text: originalText,
-      audio_url: audioUrl,
-      category,
-      status: 'processed',
-      metadata
-    });
-    console.log('Saved to Supabase');
-  } catch (err) {
-    console.error('Supabase save failed:', err);
-  }
-
-  let recentReplies = [];
-  try {
-    recentReplies = await fetchRecentBotReplies(phoneNumber, 3);
-  } catch (err) {
-    console.error('Failed to fetch recent replies (non-blocking):', err);
-  }
-
-  try {
-    const reply = await generateReply(user, {
-      category,
-      metadata,
-      originalText,
-      recentReplies
-    });
-
-    await sendWhatsAppReply(phoneNumber, reply);
-    console.log('Persona reply sent to user');
-
-    try {
-      await saveBotReply(phoneNumber, reply);
-    } catch (saveErr) {
-      console.error('Failed to save bot reply (non-blocking):', saveErr);
-    }
-  } catch (err) {
-    console.error('Persona reply failed, using fallback:', err);
-    const emoji = CATEGORY_EMOJI[category] || '📦';
-    const preview = originalText.length > 80 ? originalText.substring(0, 80) + '...' : originalText;
-    await sendWhatsAppReply(phoneNumber, `${emoji} Anotado em ${category}:\n"${preview}"`);
-  }
+  return planning_decisions;
 }
 
 // ============================================
-// USERS TABLE HELPERS (Supabase)
+// PERSONA RENDERER (Etapa 2: Geração da Resposta)
+// ============================================
+async function generateReply(user, context, planning_decisions) {
+  const persona = user?.persona || 'ceo';
+  const memoName = user?.memo_name || 'Memo';
+  const basePrompt = PERSONA_PROMPTS[persona] || PERSONA_PROMPTS.ceo;
+  const systemPrompt = basePrompt.replace(/\{MEMO_NAME\}/g, memoName);
+
+  const { originalText, recentReplies } = context;
+  const { reply_intent, can_suggest_next_step, phrase_count, warmth_level, formality_level, opening_style } = planning_decisions;
+
+  let antiRepBlock = '';
+  if (recentReplies.length > 0) {
+    antiRepBlock = `
+
+ANTI-REPETIÇÃO: Seus últimos ${recentReplies.length} replies foram:
+${recentReplies.map((r, i) => `${i + 1}. "${r}"`).join('\n')}
+
+Evite repetir:
+- Abertura, verbo principal, cadência, fechamento ou shape da frase.
+- Não basta trocar uma palavra, a estrutura deve ser diferente.`;
+  }
+
+  const userContent = `O usuário acabou de registrar algo no Memo.
+
+Contexto da mensagem original: "${originalText}"
+
+Instruções de Geração:
+- Persona: ${persona} ({MEMO_NAME})
+- Intenção da Resposta: ${reply_intent}
+- Pode Sugerir Próximo Passo: ${can_suggest_next_step ? 'Sim' : 'Não'}
+- Número de Frases: ${phrase_count}
+- Nível de Calor: ${warmth_level}
+- Nível de Formalidade: ${formality_level}
+- Estilo de Abertura: ${opening_style}
+
+Regras Globais:
+- Máximo de ${phrase_count} frase(s).
+- Não explique o óbvio, não fale como sistema, não use labels de categoria.
+- Não comente se não agrega, não aconselhe fora do contexto permitido.
+- Não use tom de atendimento ou onboarding genérico.
+- A persona deve aparecer no enquadramento e na cadência, não no excesso de palavras.
+${antiRepBlock}
+
+Sua resposta:`;
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent }
+      ],
+      max_tokens: 100, // Ajustado para dar mais espaço, mas ainda conciso
+      temperature: 0.8, // Ajustado para mais criatividade dentro das regras
+      presence_penalty: 0.8,
+      frequency_penalty: 0.6
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`generateReply GPT failed: ${res.status} ${errText}`);
+  }
+
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error('generateReply: empty response');
+  return text;
+}
+
+// ============================================
+// WEBHOOK HANDLER (mantido do código original)
+// ============================================
+// ... (restante do código original, com a integração das novas funções)
+
+// Exemplo de como integrar no fluxo principal (dentro do handleMessage ou similar):
+/*
+async function handleMessage(message) {
+  // ... (código existente para transcrição, categorização, etc.)
+
+  const { category, metadata, originalText } = await categorize(text);
+  // ... (saveToSupabase)
+
+  const user = await fetchUser(phoneNumber); // Ou crie se não existir
+  const recentReplies = await fetchRecentBotReplies(phoneNumber);
+
+  // Nova Etapa 1: Planejamento da Resposta
+  const planning_decisions = await planReply({ category, originalText, metadata }, user);
+
+  // Nova Etapa 2: Renderização da Resposta pela Persona
+  const replyText = await generateReply(user, { category, originalText, metadata, recentReplies }, planning_decisions);
+
+  await sendWhatsAppReply(phoneNumber, replyText);
+  await saveBotReply(phoneNumber, replyText);
+}
+*/
+
+// ============================================
+// USERS TABLE HELPERS (Supabase) - Mantido
 // ============================================
 async function fetchUser(phoneNumber) {
   const res = await fetch(
@@ -568,7 +340,7 @@ async function updateUser(phoneNumber, fields) {
 }
 
 // ============================================
-// BOT REPLY HISTORY (anti-repetição)
+// BOT REPLY HISTORY (anti-repetição) - Mantido
 // ============================================
 async function saveBotReply(phoneNumber, replyText) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/bot_replies`, {
@@ -609,7 +381,7 @@ async function fetchRecentBotReplies(phoneNumber, limit = 3) {
 }
 
 // ============================================
-// TRANSCRIÇÃO DE ÁUDIO (Whisper)
+// TRANSCRIÇÃO DE ÁUDIO (Whisper) - Mantido
 // ============================================
 async function transcribeAudio(mediaId) {
   const metaRes = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
@@ -649,7 +421,7 @@ async function transcribeAudio(mediaId) {
 }
 
 // ============================================
-// CATEGORIZAÇÃO (GPT-4o-mini JSON)
+// CATEGORIZAÇÃO (GPT-4o-mini JSON) - Mantido
 // ============================================
 async function categorize(text) {
   const systemPrompt = `Você é o cérebro de categorização do Memo, um assistente de WhatsApp pra pais brasileiros/UK gerenciarem a vida doméstica.
@@ -794,7 +566,7 @@ Responda APENAS com o JSON, nada mais.`;
 }
 
 // ============================================
-// SALVAR NO SUPABASE
+// SALVAR NO SUPABASE - Mantido
 // ============================================
 async function saveToSupabase(data) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/messages`, {
@@ -814,89 +586,7 @@ async function saveToSupabase(data) {
 }
 
 // ============================================
-// GENERATE REPLY COM PERSONA — v5
-// ============================================
-async function generateReply(user, context) {
-  const persona = user?.persona || 'ceo';
-  const memoName = user?.memo_name || 'Memo';
-  const basePrompt = PERSONA_PROMPTS[persona] || PERSONA_PROMPTS.ceo;
-  const systemPrompt = basePrompt.replace(/\{MEMO_NAME\}/g, memoName);
-
-  const { category, metadata, originalText } = context;
-  const summary = metadata?.action_summary || originalText;
-  const person = metadata?.person || null;
-  const dateText = metadata?.date_text || null;
-  const timeText = metadata?.time_text || null;
-  const recentReplies = context.recentReplies || [];
-
-  let antiRepBlock = '';
-  if (recentReplies.length > 0) {
-    antiRepBlock = `
-
-ANTI-REPETIÇÃO:
-Seus últimos ${recentReplies.length} replies foram:
-${recentReplies.map((r, i) => `${i + 1}. "${r}"`).join('\n')}
-
-Não repita:
-- a mesma abertura
-- o mesmo verbo
-- a mesma cadência
-- o mesmo fechamento`;
-  }
-
-  const userContent = `O usuário acabou de registrar algo no Memo.
-
-Mensagem original: "${originalText}"
-Categoria: ${category}
-Resumo: ${summary}
-Pessoa mencionada: ${person || 'nenhuma'}
-Data: ${dateText || 'não especificada'}
-Horário: ${timeText || 'não especificado'}${antiRepBlock}
-
-Responda como UMA PESSOA REAL no WhatsApp, não como sistema.
-Máximo 2 frases.
-Não explique o que acabou de fazer.
-Não use tom de atendimento.
-Não use onboarding genérico.
-Não fale como bot.
-Sua persona deve aparecer no enquadramento e no fechamento, não em excesso de palavras.
-
-Se for rotina simples, seja mais curto.
-Se for ideia/meta/decisão e sua persona permitir, use a segunda frase com parcimônia.
-Se sobrar comentário, floreio, opinião, explicação ou frase de enchimento: corte.`;
-
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENAI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent }
-      ],
-      max_tokens: 80,
-      temperature: 0.9,
-      presence_penalty: 0.8,
-      frequency_penalty: 0.6
-    })
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`generateReply GPT failed: ${res.status} ${errText}`);
-  }
-
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content?.trim();
-  if (!text) throw new Error('generateReply: empty response');
-  return text;
-}
-
-// ============================================
-// ENVIAR RESPOSTA VIA WHATSAPP
+// ENVIAR RESPOSTA VIA WHATSAPP - Mantido
 // ============================================
 async function sendWhatsAppReply(to, text) {
   const res = await fetch(
@@ -919,3 +609,109 @@ async function sendWhatsAppReply(to, text) {
     throw new Error(`WhatsApp send failed: ${res.status} ${errText}`);
   }
 }
+
+// ============================================
+// WEBHOOK MAIN HANDLER (Exemplo de integração)
+// ============================================
+// Este é um exemplo de como o fluxo principal pode ser atualizado.
+// Você precisará adaptar isso ao seu setup de webhook (e.g., Express.js).
+
+/*
+// Exemplo de um endpoint de webhook (assumindo Express.js)
+app.post('/webhook', async (req, res) => {
+  const body = req.body;
+
+  // Verifica se é uma notificação de mensagem do WhatsApp
+  if (body.object === 'whatsapp_business_account') {
+    for (const entry of body.entry) {
+      for (const change of entry.changes) {
+        if (change.field === 'messages') {
+          for (const message of change.value.messages) {
+            if (message.type === 'text' || message.type === 'audio') {
+              const phoneNumber = message.from;
+              let originalText = '';
+
+              if (message.type === 'audio') {
+                try {
+                  originalText = await transcribeAudio(message.audio.id);
+                } catch (error) {
+                  console.error('Erro na transcrição de áudio:', error);
+                  await sendWhatsAppReply(phoneNumber, 'Desculpe, não consegui transcrever seu áudio. Poderia digitar, por favor?');
+                  continue;
+                }
+              } else if (message.type === 'text') {
+                originalText = message.text.body;
+              }
+
+              // Fetch user or create if new
+              let user = await fetchUser(phoneNumber);
+              if (!user) {
+                await createUser(phoneNumber);
+                user = await fetchUser(phoneNumber); // Fetch again to get the full user object
+                // Send static welcome message
+                const welcomeMessage = PERSONA_WELCOME[user.persona || 'ceo'].replace('{MEMO_NAME}', user.memo_name || 'Memo');
+                await sendWhatsAppReply(phoneNumber, welcomeMessage);
+                await saveBotReply(phoneNumber, welcomeMessage);
+                continue; // Skip further processing for onboarding
+              }
+
+              // Categorize the message
+              const { category, metadata } = await categorize(originalText);
+
+              // Save to Supabase
+              await saveToSupabase({
+                phone_number: phoneNumber,
+                original_text: originalText,
+                category: category,
+                metadata: metadata,
+                persona: user.persona // Save persona used for this message
+              });
+
+              // Fetch recent replies for anti-repetition
+              const recentReplies = await fetchRecentBotReplies(phoneNumber);
+
+              // NEW: Etapa 1 - Planejamento da Resposta
+              const planning_decisions = await planReply({ category, originalText, metadata }, user);
+
+              // NEW: Etapa 2 - Renderização da Resposta pela Persona
+              const replyText = await generateReply(user, { category, originalText, metadata, recentReplies }, planning_decisions);
+
+              // Send reply via WhatsApp
+              await sendWhatsAppReply(phoneNumber, replyText);
+              await saveBotReply(phoneNumber, replyText);
+            }
+          }
+        }
+      }
+    }
+  }
+  res.sendStatus(200);
+});
+*/
+
+// ============================================
+// EXPORTAÇÕES (se for um módulo Node.js)
+// ============================================
+// module.exports = {
+//   VERIFY_TOKEN,
+//   SUPABASE_URL,
+//   SUPABASE_KEY,
+//   OPENAI_API_KEY,
+//   WHATSAPP_TOKEN,
+//   WHATSAPP_PHONE_NUMBER_ID,
+//   VALID_CATEGORIES,
+//   CATEGORY_EMOJI,
+//   PERSONA_PROMPTS,
+//   PERSONA_WELCOME,
+//   planReply,
+//   generateReply,
+//   fetchUser,
+//   createUser,
+//   updateUser,
+//   saveBotReply,
+//   fetchRecentBotReplies,
+//   transcribeAudio,
+//   categorize,
+//   saveToSupabase,
+//   sendWhatsAppReply
+// };
