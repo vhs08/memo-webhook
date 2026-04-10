@@ -1,7 +1,7 @@
 // Memo Assistant — WhatsApp Webhook Handler (Phase 3)
 // Fluxo: recebe mensagem → (onboarding se user novo) → (áudio vira texto via Whisper)
 //         → categoriza com GPT-4o-mini → grava no Supabase → GERA REPLY COM PERSONA via GPT
-// Categorias (4): FINANCAS, COMPRAS, AGENDA, LEMBRETES
+// Categorias (5): FINANCAS, COMPRAS, AGENDA, IDEIAS, LEMBRETES
 // Personas (4): alfred, mae, coach, ceo
 
 // ============================================
@@ -14,15 +14,16 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
-// Categorias válidas (taxonomia simplificada 2026-04-09: 4 categorias)
-const VALID_CATEGORIES = ['AGENDA', 'COMPRAS', 'LEMBRETES', 'FINANCAS'];
+// Categorias válidas (5 categorias — IDEIAS adicionada 2026-04-10)
+const VALID_CATEGORIES = ['AGENDA', 'COMPRAS', 'LEMBRETES', 'FINANCAS', 'IDEIAS'];
 
 // Emojis de confirmação por categoria (fallback se generateReply falhar)
 const CATEGORY_EMOJI = {
   AGENDA: '📅',
   COMPRAS: '🛒',
   LEMBRETES: '📝',
-  FINANCAS: '💰'
+  FINANCAS: '💰',
+  IDEIAS: '💡'
 };
 
 // ============================================
@@ -297,6 +298,15 @@ Cada reply precisa ter:
 • Um ÂNGULO (observação, conexão, afeto, reframe, priorização — conforme sua persona) — nunca apenas "confirmação"
 
 WOW NÃO vem de energia alta. WOW vem de ESPECIFICIDADE + OBSERVAÇÃO AGUDA + FUGA DO ESTEREÓTIPO RASO da sua persona.
+
+═══════════════════════════════════════════
+📏 BREVIDADE ABSOLUTA
+═══════════════════════════════════════════
+
+MÁXIMO 25 PALAVRAS por reply. Sem exceção.
+1-2 frases curtas. NUNCA 3.
+Persona forte CORTA, não enrola. Se precisa de mais de 2 frases, você não achou a frase certa.
+Cada palavra deve CARREGAR peso. Se a palavra pode ser removida sem perder sentido, remova.
 `;
 
 // Rótulos legíveis das personas (pra mensagens de onboarding)
@@ -487,15 +497,31 @@ async function processMessage(body) {
     console.error('Supabase save failed:', err);
   }
 
+  // Busca últimos 3 replies do bot pra anti-repetição (Rota B)
+  let recentReplies = [];
+  try {
+    recentReplies = await fetchRecentBotReplies(phoneNumber, 3);
+  } catch (err) {
+    console.error('Failed to fetch recent replies (non-blocking):', err);
+  }
+
   // Gera reply DINÂMICO com persona via GPT
   try {
     const reply = await generateReply(user, {
       category,
       metadata,
-      originalText
+      originalText,
+      recentReplies
     });
     await sendWhatsAppReply(phoneNumber, reply);
     console.log('Persona reply sent to user');
+
+    // Salva o reply do bot no Supabase pra anti-repetição futura
+    try {
+      await saveBotReply(phoneNumber, reply);
+    } catch (saveErr) {
+      console.error('Failed to save bot reply (non-blocking):', saveErr);
+    }
   } catch (err) {
     console.error('Persona reply failed, using fallback:', err);
     // Fallback: template estático antigo
@@ -567,6 +593,50 @@ async function updateUser(phoneNumber, fields) {
 }
 
 // ============================================
+// BOT REPLY HISTORY (anti-repetição Rota B)
+// Salva e busca replies do bot pra injetar como contexto no GPT.
+// Usa tabela separada "bot_replies" (phone_number, reply_text, created_at).
+// ============================================
+async function saveBotReply(phoneNumber, replyText) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/bot_replies`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      Prefer: 'return=minimal'
+    },
+    body: JSON.stringify({
+      phone_number: phoneNumber,
+      reply_text: replyText
+    })
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`saveBotReply failed: ${res.status} ${errText}`);
+  }
+}
+
+async function fetchRecentBotReplies(phoneNumber, limit = 3) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/bot_replies?phone_number=eq.${encodeURIComponent(phoneNumber)}&select=reply_text&order=created_at.desc&limit=${limit}`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`fetchRecentBotReplies failed: ${res.status} ${errText}`);
+  }
+  const rows = await res.json();
+  // Retorna em ordem cronológica (mais antigo primeiro)
+  return rows.map(r => r.reply_text).reverse();
+}
+
+// ============================================
 // TRANSCRIÇÃO DE ÁUDIO (Whisper) — inalterado do Phase 2
 // ============================================
 async function transcribeAudio(mediaId) {
@@ -614,10 +684,11 @@ async function categorize(text) {
 
 Sua tarefa: ler a mensagem do usuário e devolver um JSON estruturado com a categoria + metadados úteis.
 
-CATEGORIAS VÁLIDAS (escolha EXATAMENTE UMA das 4):
+CATEGORIAS VÁLIDAS (escolha EXATAMENTE UMA das 5):
 - FINANCAS: movimento financeiro JÁ CONFIRMADO (verbo no passado: "paguei", "gastei", "transferi", "recebi")
 - COMPRAS: registro de compra JÁ REALIZADA (verbo no passado: "comprei", "já comprei", "adquiri")
 - AGENDA: compromissos/eventos com data/hora específica OU com recorrência, pra comparecer
+- IDEIAS: pensamentos, ideias de negócio, reflexões, planos futuros vagos, insights — NÃO são tarefas com ação imediata
 - LEMBRETES: TODAS as pendências — pagar, comprar, fazer, marcar, itens a repor, tarefas a realizar
 
 REGRAS DE PRIORIDADE — AVALIE NESTA ORDEM EXATA (pare na primeira que bater):
@@ -649,7 +720,18 @@ Exemplos:
 - "Catequese domingo de manhã" → AGENDA (recorrente)
 - "Tenho entrevista de emprego amanhã 9h" → AGENDA
 
-PASSO 4 — LEMBRETES (fallback — TODAS as pendências):
+PASSO 4 — IDEIAS (pensamentos, ideias, reflexões, planos vagos):
+Quando o usuário está PENSANDO, não FAZENDO. Registros de ideias de negócio, reflexões pessoais, planos futuros sem data nem ação concreta, insights, brainstorms.
+Exemplos:
+- "Tive uma ideia de negócio: um app pra landlords" → IDEIAS
+- "Pensei em criar um curso de culinária" → IDEIAS
+- "E se a gente mudasse pro interior?" → IDEIAS
+- "Acho que seria bom investir em ações" → IDEIAS (reflexão, não ação)
+- "Quero começar a gravar vídeos pro YouTube" → IDEIAS (desejo/plano vago, sem ação concreta)
+- "Tive um insight sobre a escola do Luigi" → IDEIAS
+IMPORTANTE: Se a mensagem tem AÇÃO CONCRETA + DATA ("marcar reunião com contador amanhã pra discutir a ideia") → é AGENDA ou LEMBRETES, não IDEIAS. IDEIAS é pra pensamento puro, sem ação imediata.
+
+PASSO 5 — LEMBRETES (fallback — TODAS as pendências):
 Tudo que NÃO é passado financeiro confirmado (PASSO 1), NÃO é compra feita no passado (PASSO 2), e NÃO é evento marcado com hora/recorrência (PASSO 3). Toda pendência ativa cai aqui.
 Inclui:
 - Pagamentos a fazer — "pagar dentista sexta", "pagar futebol do Luigi", "pagar escola", "boleto vence dia 20", "mensalidade da academia"
@@ -659,13 +741,14 @@ Inclui:
 - Tarefas escolares sem horário — "boletim do Luigi chegou", "ajudar Luigi com lição de casa", "entregar trabalho dia 13"
 - Tarefas domésticas sem hora — "levar roupa na lavanderia", "consertar torneira"
 
-PRINCÍPIO GERAL: o TEMPO VERBAL define a categoria.
+PRINCÍPIO GERAL: o TEMPO VERBAL e a INTENÇÃO definem a categoria.
 - Pretérito financeiro ("paguei", "gastei") → FINANCAS
 - Pretérito de compra ("comprei") → COMPRAS
 - Evento com hora marcada OU recorrência → AGENDA
+- Pensamento/reflexão/ideia sem ação concreta ("tive uma ideia", "pensei em", "e se...") → IDEIAS
 - TUDO MAIS (incluindo "pagar X" e "comprar X" no futuro/infinitivo) → LEMBRETES
 
-Regra mnemônica: passado confirmado vira log (FINANCAS/COMPRAS); futuro pendente vira tarefa (LEMBRETES); evento marcado vira compromisso (AGENDA).
+Regra mnemônica: passado confirmado vira log (FINANCAS/COMPRAS); evento marcado vira compromisso (AGENDA); pensamento puro vira ideia (IDEIAS); ação pendente vira tarefa (LEMBRETES).
 
 EXTRAÇÃO DE METADADOS IMPORTANTES:
 - "recurrence": se a mensagem explicita um padrão de repetição ("todo sábado", "toda semana", "todo dia 5"), capture em linguagem natural. Senão null.
@@ -674,7 +757,7 @@ EXTRAÇÃO DE METADADOS IMPORTANTES:
 
 FORMATO DA RESPOSTA (JSON válido, sem texto fora):
 {
-  "category": "FINANCAS" | "COMPRAS" | "AGENDA" | "LEMBRETES",
+  "category": "FINANCAS" | "COMPRAS" | "AGENDA" | "IDEIAS" | "LEMBRETES",
   "confidence": "high" | "medium" | "low",
   "needs_review": true | false,
   "clean_text": "texto da mensagem limpo e com pontuação correta",
@@ -785,6 +868,16 @@ async function generateReply(user, context) {
     const dateText = metadata?.date_text || null;
     const timeText = metadata?.time_text || null;
 
+    // Monta bloco de anti-repetição com histórico real
+    const recentReplies = context.recentReplies || [];
+    let antiRepBlock = '';
+    if (recentReplies.length > 0) {
+      antiRepBlock = `\n\n⚠️ ANTI-REPETIÇÃO (seus ${recentReplies.length} replies anteriores — NÃO repita aberturas, verbos de registro nem estrutura deles):
+${recentReplies.map((r, i) => `${i + 1}. "${r}"`).join('\n')}
+
+PROIBIDO reutilizar a primeira palavra de qualquer reply acima. PROIBIDO reutilizar o verbo de registro de qualquer reply acima. Use alternativas da sua biblioteca.`;
+    }
+
     userContent = `[EVENTO: O usuário acabou de registrar um item no sistema.
 
 Mensagem original do usuário: "${originalText}"
@@ -797,14 +890,15 @@ Horário: ${timeText || 'não especificado'}
 PASSO 1 — LEITURA DE TOM (obrigatório, faça mentalmente antes de escrever):
 Leia a mensagem original e classifique o CLIMA: LEVE/FESTIVO, SÉRIO/PESADO, ROTINEIRO/FUNCIONAL ou EMOCIONAL/AFETIVO. Exemplo: "carvão, picanha, cerveja" = LEVE/FESTIVO (churrasco); "Luigi sem TV por uma semana" = SÉRIO (castigo); "pagar council tax" = ROTINEIRO; "aniversário da vovó" = EMOCIONAL.
 
-PASSO 2 — RESPONDA no tom da sua PERSONA, modulado pelo CLIMA detectado.
+PASSO 2 — RESPONDA no tom da sua PERSONA, modulado pelo CLIMA detectado. MÁXIMO 2 frases curtas (25 palavras no total).${antiRepBlock}
 
 REGRAS CRÍTICAS:
-- NUNCA use template fixo nem estrutura repetitiva. O usuário vai receber dezenas dessas por semana.
-- VARIE abertura, verbo de registro (use a biblioteca da sua persona) e estrutura em relação ao reply anterior.
+- MÁXIMO 25 PALAVRAS. Seja CURTO. Persona forte não precisa de muitas palavras.
+- NUNCA use template fixo nem estrutura repetitiva.
+- VARIE abertura, verbo de registro (use a biblioteca da sua persona) e estrutura.
 - Mencione a categoria de forma natural, nunca como label robótico ([${category}]).
 - Se a mensagem tiver pessoa/data/hora relevante, incorpore naturalmente.
-- O clima da mensagem original é o que determina a LEVEZA ou GRAVIDADE do seu reply — persona não muda, peso muda.
+- O clima da mensagem original é o que determina a LEVEZA ou GRAVIDADE do seu reply.
 - Seja surpreendente dentro do seu tom — não previsível.]`;
   }
 
@@ -820,10 +914,10 @@ REGRAS CRÍTICAS:
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent }
       ],
-      max_tokens: 120,
-      temperature: 0.95, // ALTA pra maximizar variação
-      presence_penalty: 0.6, // penaliza reuso de palavras
-      frequency_penalty: 0.4
+      max_tokens: 60, // REDUZIDO de 120 pra forçar brevidade mecânica (25 palavras ≈ 50-60 tokens)
+      temperature: 0.85, // Reduzido de 0.95 — variação boa mas mais controlado
+      presence_penalty: 0.7, // Aumentado — penaliza forte reuso de palavras
+      frequency_penalty: 0.5 // Aumentado — força vocabulário variado
     })
   });
 
