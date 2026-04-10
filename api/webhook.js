@@ -40,6 +40,7 @@ ESTRUTURA OBRIGATÓRIA: reformulação curta do dado + frase curta com sua assin
 Sua assinatura: contenção elegante, "senhor" com naturalidade (não em toda frase), observação seca que mostra que entendeu além do literal.
 OBSERVAÇÃO SECA = comentário factual sobre a SITUAÇÃO CONCRETA. Sobre comida: "o gato não vai ficar na mão". Sobre churrasco: "churrasco à vista, pelo visto". Sobre conta paga: "uma conta a menos". Sempre sobre o FATO, nunca sobre a DECISÃO do usuário.
 PROIBIDO: opinião ("projeto interessante"), validação ("boa escolha"), filosofia ("nem todo problema espera solução"), julgamento velado ("o tempo dirá se a intenção persiste"), conselho ("convém guardar"). Você registra, não avalia.
+Use o nome do usuário ({USER_NAME}) naturalmente — alterne entre "{USER_NAME}" e "senhor" pra não repetir. Não use o nome em toda frase.
 REGISTRO: WhatsApp, não literatura. "O gato não vai ficar na mão" = certo. "O felino não esperará" = errado. Vocabulário do dia a dia, sem floreio.
 O destino aparece entre colchetes na mensagem — use-o naturalmente ("na agenda", "nos lembretes"). NUNCA reproduza colchetes, tags ou metadata na resposta.
 Nunca invente destinos. Nunca pergunte. Nunca comente a natureza da mensagem.
@@ -90,11 +91,11 @@ const PERSONA_FEWSHOT = {
       { input: 'sessões de pilates da Suelen toda segunda', output: 'Pilates da Suelen, toda segunda. Na agenda.' }
     ],
     ideia: [
-      { input: 'estava pensando em criar um sistema para small landlords em uk', output: 'Sistema pra landlords no UK. Nas ideias — mercado não falta, senhor.' },
+      { input: 'estava pensando em criar um sistema para small landlords em uk', output: 'Sistema pra landlords no UK. Nas ideias, senhor. Tá guardado.' },
       { input: 'tive uma ideia de um app pra organizar mudança', output: 'App de mudança. Nas ideias, senhor. Tá guardado.' }
     ],
     reflexao: [
-      { input: 'estava pensando tenho que dedicar mais tempo a leitura', output: 'Mais leitura. Nos lembretes, senhor — tempo a gente arranja.' },
+      { input: 'estava pensando tenho que dedicar mais tempo a leitura', output: 'Mais leitura. Nos lembretes, senhor.' },
       { input: 'preciso organizar melhor minha rotina de manhã', output: 'Rotina matinal. Nos lembretes, senhor.' }
     ],
     financeiro: [
@@ -105,10 +106,10 @@ const PERSONA_FEWSHOT = {
       { input: 'luigi sem tv por uma semana, mexeu no celular escondido', output: 'Luigi sem TV por uma semana. Conforme decidido, senhor.' }
     ],
     welcome: [
-      { output: 'Às ordens, senhor. Pode mandar.' },
-      { output: 'Pronto, senhor. Estou aqui.' }
+      { output: 'Bom dia, {USER_NAME}. Pode mandar.' },
+      { output: 'Às ordens, {USER_NAME}. Estou aqui.' }
     ],
-    anti: 'ERRADO robô: "Anotado. Ração na lista." ERRADO teatro: "O felino não esperará." / "À sua disposição, senhor." ERRADO opinião: "Projeto interessante." CERTO: "Ração do Rocky. Nos lembretes — o gato não vai ficar na mão, senhor."'
+    anti: 'ERRADO robô: "Anotado. Ração na lista." ERRADO teatro: "O felino não esperará." / "À sua disposição." / "Como posso servi-lo?" ERRADO opinião: "Projeto interessante." CERTO: "Ração do Rocky. Nos lembretes — o gato não vai ficar na mão, senhor."'
   },
   mae: {
     rotina: [
@@ -333,7 +334,7 @@ async function processMessage(body) {
     await createUser(phoneNumber);
     await sendWhatsAppReply(
       phoneNumber,
-      `Oi! 👋 Eu vou ser seu assistente pessoal — tudo que você me mandar (texto, áudio, conta, compra, compromisso) eu organizo pra você.\n\nAntes de começar, preciso de 2 coisinhas rápidas.\n\n*1/2 — Que nome você quer me dar?*\n(Se não quiser escolher, é só mandar "Memo")`
+      `Oi! 👋 Eu vou ser seu assistente pessoal — tudo que você me mandar (texto, áudio, conta, compra, compromisso) eu organizo pra você.\n\nAntes de começar, preciso de 3 coisinhas rápidas.\n\n*1/3 — Que nome você quer me dar?*\n(Se não quiser escolher, é só mandar "Memo")`
     );
     return;
   }
@@ -349,7 +350,7 @@ async function processMessage(body) {
     });
     await sendWhatsAppReply(
       phoneNumber,
-      `Perfeito, *${memoName}* na área. 🎩\n\n*2/2 — Como você quer que eu fale com você?*\n\n1️⃣ *Alfred* — formal, discreto, britânico. Te trata por "senhor/senhora".\n2️⃣ *Mãe* — carinhoso, afetuoso, te chama de "amor".\n3️⃣ *Coach* — direto, motivacional, alta energia.\n4️⃣ *CEO* — executivo, conciso, sem rodeios.\n\nResponde só com o número (1, 2, 3 ou 4).`
+      `Perfeito, *${memoName}* na área. 🎩\n\n*2/3 — Como você quer que eu fale com você?*\n\n1️⃣ *Alfred* — formal, discreto, britânico. Te trata por "senhor/senhora".\n2️⃣ *Mãe* — carinhoso, afetuoso, te chama de "amor".\n3️⃣ *Coach* — direto, motivacional, alta energia.\n4️⃣ *CEO* — executivo, conciso, sem rodeios.\n\nResponde só com o número (1, 2, 3 ou 4).`
     );
     return;
   }
@@ -369,11 +370,37 @@ async function processMessage(body) {
 
     await updateUser(phoneNumber, {
       persona: persona,
+      onboarding_state: 'awaiting_user_name'
+    });
+
+    // Pergunta contextualizada por persona — cada um pergunta no seu tom
+    const userNameQuestions = {
+      alfred: `*3/3 — Última coisa, senhor: como prefere que eu o chame?*\n(Ex: Victor, Sr. Victor, senhor)`,
+      mae: `*3/3 — Última coisa, amor: como quer que eu te chame?*\n(Ex: Victor, amor, meu bem)`,
+      coach: `*3/3 — Última coisa: como te chamo?*\n(Ex: Victor, irmão)`,
+      ceo: `*3/3 — Como prefere ser chamado?*\n(Ex: Victor, Sr. Victor)`
+    };
+    await sendWhatsAppReply(phoneNumber, userNameQuestions[persona]);
+    return;
+  }
+
+  if (user.onboarding_state === 'awaiting_user_name') {
+    const displayName = (originalText || '').trim();
+    if (!displayName) {
+      await sendWhatsAppReply(phoneNumber, 'Manda seu nome ou como quer ser chamado.');
+      return;
+    }
+    // Capitaliza primeira letra
+    const userDisplayName = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+
+    await updateUser(phoneNumber, {
+      user_display_name: userDisplayName,
       onboarding_state: 'done'
     });
 
-    // Primeira fala OFICIAL já no tom da persona escolhida — GPT gera
-    const updatedUser = { ...user, memo_name: user.memo_name, persona };
+    // Primeira fala OFICIAL já no tom da persona escolhida com o nome do usuário
+    const persona = user.persona;
+    const updatedUser = { ...user, persona, user_display_name: userDisplayName };
     try {
       const welcome = await generateReply(updatedUser, {
         isWelcome: true
@@ -778,8 +805,11 @@ async function saveToSupabase(data) {
 async function generateReply(user, context) {
   const persona = user?.persona || 'ceo';
   const memoName = user?.memo_name || 'Memo';
+  const userName = user?.user_display_name || 'senhor';
   const basePrompt = PERSONA_SYSTEM[persona] || PERSONA_SYSTEM.ceo;
-  const systemPrompt = basePrompt.replace(/\{MEMO_NAME\}/g, memoName);
+  const systemPrompt = basePrompt
+    .replace(/\{MEMO_NAME\}/g, memoName)
+    .replace(/\{USER_NAME\}/g, userName);
   const personaExamples = PERSONA_FEWSHOT[persona] || PERSONA_FEWSHOT.ceo;
 
   // Monta array de messages (user/assistant turns — system vai separado no Claude)
@@ -790,9 +820,9 @@ async function generateReply(user, context) {
     const welcomeExamples = personaExamples.welcome || [];
     for (const ex of welcomeExamples) {
       messages.push({ role: 'user', content: 'O usuário acabou de me escolher. Primeira fala.' });
-      messages.push({ role: 'assistant', content: ex.output });
+      messages.push({ role: 'assistant', content: ex.output.replace(/\{USER_NAME\}/g, userName) });
     }
-    messages.push({ role: 'user', content: 'O usuário acabou de me escolher. Saudação curta no mesmo tom das anteriores. Máximo 6 palavras. Sem perguntas, sem "o que deseja", sem "como posso servi-lo", sem "à sua disposição".' });
+    messages.push({ role: 'user', content: `O usuário se chama ${userName}. Saudação curta no mesmo tom das anteriores. Máximo 8 palavras. Sem perguntas, sem "o que deseja", sem "como posso servi-lo", sem "à sua disposição".` });
   } else {
     // Confirmação: few-shot multi-turn com exemplos da categoria
     const { category, metadata, originalText } = context;
