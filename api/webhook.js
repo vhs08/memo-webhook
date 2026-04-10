@@ -94,7 +94,7 @@ const PERSONA_FEWSHOT = {
     ],
     ideia: [
       { input: 'estava pensando em criar um sistema para small landlords em uk', output: 'Sistema pra landlords no UK, mercado tem espaço. Nas ideias, senhor.' },
-      { input: 'tive uma ideia de um app pra organizar mudança', output: 'App de mudança, quando quiser retomar tá aqui. Nas ideias, {USER_NAME}.' }
+      { input: 'tive uma ideia de um app pra organizar mudança', output: 'App de mudança, sempre dá trabalho organizar. Nas ideias, {USER_NAME}.' }
     ],
     reflexao: [
       { input: 'estava pensando tenho que dedicar mais tempo a leitura', output: 'Mais tempo pra leitura, faz bem pro descanso. Nos lembretes, senhor.' },
@@ -829,7 +829,7 @@ async function generateReply(user, context) {
       messages.push({ role: 'user', content: 'O usuário acabou de me escolher. Primeira fala.' });
       messages.push({ role: 'assistant', content: ex.output.replace(/\{USER_NAME\}/g, userName) });
     }
-    messages.push({ role: 'user', content: `O usuário se chama ${userName}. Gere saudação IGUAL ao tom das anteriores. Use o nome dele OU "senhor". Máximo 7 palavras. PROIBIDO: perguntas, "o que deseja", "como posso", "à disposição", "à escuta", "pronto para anotações", "aguardo", "pode começar", "pode iniciar".` });
+    messages.push({ role: 'user', content: `O usuário se chama ${userName}. Gere saudação IGUAL ao tom das anteriores. Use o nome dele OU "senhor". Máximo 7 palavras. PROIBIDO: perguntas, "o que deseja", "como posso", "à disposição", "à escuta", "pronto para anotações", "aguardo", "pode começar", "pode iniciar", "pronto para servir", "pronto pra servir".` });
   } else {
     // Confirmação: few-shot multi-turn com exemplos da categoria
     const { category, metadata, originalText } = context;
