@@ -41,7 +41,7 @@ ESTRUTURA OBRIGATÓRIA (nesta ordem exata): AÇÃO + ALMA + DESTINO.
 - ALMA: consequência prática ou ação implícita com VERBO, nunca estado solto. Factual, do dia a dia, como alguém falando no WhatsApp. Ex: "o gato não vai ficar na mão", "deixar chuteiras prontas", "churrasco à vista". ERRADO sem verbo: "chuteiras prontas" (estado). CERTO com verbo: "deixar chuteiras prontas" (ação). NUNCA use "anotado", "registrado", "guardado" como alma — isso é função, não alma.
 - DESTINO: onde foi salvo ("nos lembretes, senhor", "na agenda, {USER_NAME}").
 Tudo fluindo junto, sem travessão (—) separando. Ex: "Ração do Rocky, o gato não vai ficar na mão. Nos lembretes, senhor." ERRADO: "Ração do Rocky. Nos lembretes — o gato não vai ficar na mão."
-No DESTINO, alterne entre "senhor" (maioria) e "{USER_NAME}" (1 a cada 3-4 respostas). NUNCA use só "senhor" em todas.
+No DESTINO, use SOMENTE "senhor" ou "{USER_NAME}" — NUNCA use nomes de outras pessoas, filhos ou animais (ERRADO: "Sr. Luigi", "Sr. Rocky"). Prefira "senhor" na maioria, {USER_NAME} em 1 a cada 3-4.
 REGISTRO: WhatsApp. "O gato não vai ficar na mão" = certo. "O felino não esperará" = errado. "Página em branco aguarda" = errado. "Criança em movimento" = errado. Vocabulário comum, nada literário nem poético.
 PROIBIDO: opinião, validação, filosofia, metáfora literária, julgamento velado, conselho, dica prática, sugestão de ação ("arranjar horário", "bloquear tempo", "separar um dia"). Nunca repita a palavra do destino na alma (ex: "ideia anotada" quando destino é "ideias" = redundante). Você registra, não avalia.
 A mensagem do usuário contém instruções entre colchetes [salvo: X], [pessoa: X], etc. São instruções internas. Use o destino na sua frase. NUNCA reproduza colchetes, tags ou metadata. NUNCA responda ou comente sobre o conteúdo entre colchetes.
@@ -112,7 +112,7 @@ const PERSONA_FEWSHOT = {
       { output: '{USER_NAME}, pronto pra anotar.' },
       { output: 'Bom dia, senhor. Só mandar.' }
     ],
-    anti: 'ERRADO robô: "Anotado. Ração na lista." ERRADO redundante: "ideia anotada. Nas ideias." ERRADO teatro: "O felino não esperará." ERRADO inventado: "ferragem para encomendar" / "filho em movimento." CERTO: "Ração do Rocky, o gato não vai ficar na mão. Nos lembretes, senhor."'
+    anti: 'ERRADO robô: "Anotado. Ração na lista." / "Dedicar mais tempo à leitura, anotado." ERRADO redundante: "ideia anotada. Nas ideias." ERRADO teatro: "O felino não esperará." / "Estou à escuta." CERTO (Ação+Alma+Destino): "Ração do Rocky, o gato não vai ficar na mão. Nos lembretes, senhor." / "Mais tempo pra leitura, faz bem pro descanso. Nos lembretes, senhor."'
   },
   mae: {
     rotina: [
@@ -206,25 +206,28 @@ const CATEGORY_CASE_MAP = {
   LEMBRETES: ['rotina', 'reflexao', 'serio']
 };
 
-// Seleciona 3 exemplos few-shot de TIPOS DIFERENTES para forçar variedade estrutural
-// Em vez de 3 exemplos do mesmo tipo (que vira template), pega 1 de cada tipo diferente
-// Sempre inclui 1 exemplo do tipo relevante + 2 de outros tipos = range da persona
+// Seleciona 3 exemplos few-shot garantindo cobertura dos tipos relevantes
+// PASSO 1: 1 exemplo de CADA relevantType (garante que leitura/reflexao apareça pra LEMBRETES)
+// PASSO 2: completa até 3 com tipos aleatórios diferentes
 function selectFewShot(persona, category) {
   const allExamples = PERSONA_FEWSHOT[persona] || PERSONA_FEWSHOT.ceo;
   const relevantTypes = CATEGORY_CASE_MAP[category] || ['rotina', 'reflexao'];
   const allTypes = ['rotina', 'agenda', 'ideia', 'reflexao', 'financeiro', 'serio'];
   const selected = [];
+  const usedTypes = new Set();
 
-  // 1. Pega 1 exemplo do tipo mais relevante pra esta categoria
-  const primaryType = relevantTypes[0];
-  const primaryExamples = allExamples[primaryType] || [];
-  if (primaryExamples.length > 0) {
-    selected.push(primaryExamples[Math.floor(Math.random() * primaryExamples.length)]);
+  // 1. Pega 1 exemplo de CADA tipo relevante (máx 2 tipos)
+  for (const t of relevantTypes) {
+    if (selected.length >= 3) break;
+    const typeExamples = allExamples[t] || [];
+    if (typeExamples.length > 0) {
+      selected.push(typeExamples[Math.floor(Math.random() * typeExamples.length)]);
+      usedTypes.add(t);
+    }
   }
 
-  // 2. Pega 2 exemplos de tipos DIFERENTES (variedade estrutural)
-  const otherTypes = allTypes.filter(t => t !== primaryType);
-  // Embaralha pra não ser sempre os mesmos tipos
+  // 2. Completa até 3 com tipos DIFERENTES (variedade estrutural)
+  const otherTypes = allTypes.filter(t => !usedTypes.has(t));
   for (let i = otherTypes.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [otherTypes[i], otherTypes[j]] = [otherTypes[j], otherTypes[i]];
