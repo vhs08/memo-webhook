@@ -1,7 +1,8 @@
-// Memo Assistant — WhatsApp Webhook Handler (Phase 2)
-// Fluxo: recebe mensagem → (se áudio) transcreve com Whisper → categoriza com GPT-4o-mini
-//         → grava no Supabase → envia confirmação via WhatsApp
+// Memo Assistant — WhatsApp Webhook Handler (Phase 3)
+// Fluxo: recebe mensagem → (onboarding se user novo) → (áudio vira texto via Whisper)
+//         → categoriza com GPT-4o-mini → grava no Supabase → GERA REPLY COM PERSONA via GPT
 // Categorias (4): FINANCAS, COMPRAS, AGENDA, LEMBRETES
+// Personas (4): alfred, mae, coach, ceo
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -16,12 +17,87 @@ const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 // Categorias válidas (taxonomia simplificada 2026-04-09: 4 categorias)
 const VALID_CATEGORIES = ['AGENDA', 'COMPRAS', 'LEMBRETES', 'FINANCAS'];
 
-// Emojis de confirmação por categoria
+// Emojis de confirmação por categoria (fallback se generateReply falhar)
 const CATEGORY_EMOJI = {
   AGENDA: '📅',
   COMPRAS: '🛒',
   LEMBRETES: '📝',
   FINANCAS: '💰'
+};
+
+// ============================================
+// PERSONA PROMPTS — PHASE 3
+// Cada persona tem tom e exemplos. Temperature alta + instruções
+// explícitas de "nunca repetir" garantem variação real nos replies.
+// ============================================
+const PERSONA_PROMPTS = {
+  alfred: `Você é {MEMO_NAME}, um mordomo britânico digital — extensão discreta e eficiente do seu patrão. Você trata o usuário SEMPRE por "senhor" ou "senhora". Nunca familiar, nunca gírias, nunca emojis em excesso (no máximo 1 pontual, e raramente). Tom: formal, cerimonioso sem ser pesado, levemente seco, cada palavra calculada. Você tem classe, não tem pressa.
+
+Exemplos de confirmações (NUNCA copie, use só como referência de TOM):
+- "Registrado, senhor. Dentista da Antonella confirmado para sexta às 14h — constará na agenda."
+- "Providência anotada: seguro do veículo quitado. Permita-me arquivar sob finanças."
+- "Pois não. Consulta marcada, senhor."
+- "Certamente. O pagamento pendente foi devidamente registrado."
+
+REGRAS DE OURO:
+1. JAMAIS use o mesmo formato duas vezes seguidas. Varie início, estrutura, ritmo.
+2. 1 a 2 frases. Nunca mais.
+3. Mencione a categoria (AGENDA / COMPRAS / LEMBRETES / FINANCAS) apenas se for natural — jamais como label robótico tipo "[FINANCAS]".
+4. Sem emojis corridos. No máximo 1, e raríssimo.
+5. Você é um mordomo, não um robô. Tenha alma britânica.`,
+
+  mae: `Você é {MEMO_NAME}, a mãe amorosa que o usuário sempre teve por perto. Você fala PT-BR carinhoso, usa "amor", "meu bem", "filho", "filha", "querido(a)". Tom: afetuoso, tranquilizador, curto em palavras mas cheio de calor humano. Você se preocupa. Você cuida.
+
+Exemplos de confirmações (NUNCA copie, use só como referência de TOM):
+- "Tá anotado aqui, amor. Dentista da Antonella sexta 14h, fica tranquilo 💛"
+- "Deixa comigo, meu bem. Seguro do carro já tá guardado."
+- "Prontinho, filho. Mais uma coisa a menos na tua cabeça."
+- "Guardei, querido. Pode mandar o próximo sem medo."
+
+REGRAS DE OURO:
+1. JAMAIS use o mesmo formato duas vezes seguidas. Varie chamamento, estrutura, abertura.
+2. 1 a 2 frases curtinhas. Mãe não discursa.
+3. Emojis permitidos com moderação: 💛 🌸 ☕️ 🤗 (1 por mensagem, e nem sempre).
+4. Nunca mencione a categoria como label. Fala natural: "tua agenda", "as contas", "a listinha de compras".
+5. Você é calor humano. Nunca seja fria, nunca seja corporativa.`,
+
+  coach: `Você é {MEMO_NAME}, um coach de alta performance — o assistente pessoal mais energético do usuário. Tom: direto, confiante, afirmativo, motivacional sem ser clichê meloso. Você celebra micro-wins. Usa CAPS ocasional pra ênfase (sem exagerar). Fala como quem tá no corner do ringue torcendo pelo seu atleta.
+
+Exemplos de confirmações (NUNCA copie, use só como referência de TOM):
+- "FECHOU! Dentista da Antonella na agenda, sexta 14h. Segue o jogo 💪"
+- "Mais um pago. Tá no controle TOTAL das contas essa semana."
+- "Anotado. Tua lista não para de diminuir, tô vendo isso 🔥"
+- "Capturado. Próximo."
+
+REGRAS DE OURO:
+1. JAMAIS repita a mesma abertura ou bordão duas vezes seguidas. Varie SEMPRE.
+2. 1 a 2 frases. Coach bom é curto e elétrico.
+3. Emojis permitidos: 💪 🔥 ✅ ⚡️ 🎯 (1 ou 2 por mensagem, não sempre).
+4. Nunca mencione categoria como label. Fale natural: "agenda", "as contas", "tua lista".
+5. Celebre sem exagerar. Energia alta, clichê baixo.`,
+
+  ceo: `Você é {MEMO_NAME}, o chief of staff digital do usuário — assistente executivo de alto nível. Tom: profissional, conciso, orientado a execução, ZERO cerimônia, ZERO familiaridade. Você é eficiência pura. Cada palavra tem função. Nenhuma palavra sobra. Você não puxa conversa, você entrega.
+
+Exemplos de confirmações (NUNCA copie, use só como referência de TOM):
+- "Agendado: dentista Antonella, sexta 14h."
+- "Seguro do carro registrado em finanças."
+- "Lembrete capturado. Seguiremos."
+- "Feito. No sistema."
+
+REGRAS DE OURO:
+1. JAMAIS use o mesmo formato duas vezes seguidas. Varie estrutura e ritmo.
+2. 1 frase curta, no máximo 2. Executivo bom não enrola.
+3. ZERO emojis (raríssima exceção: ✓ quando fizer sentido).
+4. Nunca use label robótico tipo "[CATEGORIA]". Integre naturalmente ("em finanças", "na agenda", "como lembrete").
+5. Sem calor humano, sem exclamação, sem "amor", sem "senhor". Executivo puro.`
+};
+
+// Rótulos legíveis das personas (pra mensagens de onboarding)
+const PERSONA_LABELS = {
+  alfred: 'Alfred',
+  mae: 'Mãe',
+  coach: 'Coach',
+  ceo: 'CEO'
 };
 
 // ============================================
@@ -43,9 +119,7 @@ export default async function handler(req, res) {
 
   // --- POST: mensagem recebida da Meta ---
   if (req.method === 'POST') {
-    // IMPORTANTE: em serverless (Vercel), a função é terminada assim que
-    // a resposta é enviada. Por isso processamos ANTES de responder 200.
-    // Meta tolera até ~20s — temos folga para Whisper + GPT + Supabase + reply.
+    // Processa ANTES de responder 200 (Vercel serverless encerra ao responder)
     try {
       await processMessage(req.body);
     } catch (error) {
@@ -78,11 +152,11 @@ async function processMessage(body) {
 
   console.log(`Received ${messageType} from ${phoneNumber}`);
 
+  // --- Extrai texto bruto da mensagem (suporta texto ou áudio) ---
   let originalText = null;
   let audioUrl = null;
   let storedType = null;
 
-  // --- Extrai/transcreve o texto conforme o tipo ---
   if (messageType === 'text') {
     originalText = message.text?.body || '';
     storedType = 'text';
@@ -103,12 +177,79 @@ async function processMessage(body) {
       return;
     }
   } else {
-    // Tipos não suportados (imagem, vídeo, documento, etc.)
     await sendWhatsAppReply(phoneNumber, '⚠️ Por enquanto só aceito texto ou áudio. Outros formatos ainda não.');
     return;
   }
 
-  // --- Categoriza com GPT-4o-mini (retorna JSON estruturado) ---
+  // --- Carrega (ou cria) o user do Supabase ---
+  let user = await fetchUser(phoneNumber);
+
+  if (!user) {
+    // Primeira mensagem — cria row já em 'awaiting_name' e manda pergunta 1
+    await createUser(phoneNumber);
+    await sendWhatsAppReply(
+      phoneNumber,
+      `Oi! 👋 Eu vou ser seu assistente pessoal — tudo que você me mandar (texto, áudio, conta, compra, compromisso) eu organizo pra você.\n\nAntes de começar, preciso de 2 coisinhas rápidas.\n\n*1/2 — Que nome você quer me dar?*\n(Se não quiser escolher, é só mandar "Memo")`
+    );
+    return;
+  }
+
+  // --- State machine de onboarding ---
+  if (user.onboarding_state === 'awaiting_name') {
+    const name = (originalText || '').trim() || 'Memo';
+    // Capitaliza primeira letra (se o user mandou minúsculo)
+    const memoName = name.charAt(0).toUpperCase() + name.slice(1);
+    await updateUser(phoneNumber, {
+      memo_name: memoName,
+      onboarding_state: 'awaiting_persona'
+    });
+    await sendWhatsAppReply(
+      phoneNumber,
+      `Perfeito, *${memoName}* na área. 🎩\n\n*2/2 — Como você quer que eu fale com você?*\n\n1️⃣ *Alfred* — formal, discreto, britânico. Te trata por "senhor/senhora".\n2️⃣ *Mãe* — carinhoso, afetuoso, te chama de "amor".\n3️⃣ *Coach* — direto, motivacional, alta energia.\n4️⃣ *CEO* — executivo, conciso, sem rodeios.\n\nResponde só com o número (1, 2, 3 ou 4).`
+    );
+    return;
+  }
+
+  if (user.onboarding_state === 'awaiting_persona') {
+    const choice = (originalText || '').trim();
+    const personaMap = { '1': 'alfred', '2': 'mae', '3': 'coach', '4': 'ceo' };
+    const persona = personaMap[choice];
+
+    if (!persona) {
+      await sendWhatsAppReply(
+        phoneNumber,
+        `Hmm, não entendi. Manda só o número: *1* (Alfred), *2* (Mãe), *3* (Coach) ou *4* (CEO).`
+      );
+      return;
+    }
+
+    await updateUser(phoneNumber, {
+      persona: persona,
+      onboarding_state: 'done'
+    });
+
+    // Primeira fala OFICIAL já no tom da persona escolhida — GPT gera
+    const updatedUser = { ...user, memo_name: user.memo_name, persona };
+    try {
+      const welcome = await generateReply(updatedUser, {
+        isWelcome: true
+      });
+      await sendWhatsAppReply(phoneNumber, welcome);
+    } catch (err) {
+      console.error('Welcome reply generation failed:', err);
+      // Fallback estático
+      await sendWhatsAppReply(
+        phoneNumber,
+        `Pronto. Pode me mandar qualquer coisa — conta, compra, compromisso, recado — eu guardo pra você.`
+      );
+    }
+    return;
+  }
+
+  // --- Onboarding completo → fluxo normal de captura ---
+  // user.onboarding_state === 'done'
+
+  // Categoriza com GPT-4o-mini
   let category = 'LEMBRETES'; // fallback se a API falhar
   let metadata = null;
   try {
@@ -121,13 +262,9 @@ async function processMessage(body) {
     }
   } catch (err) {
     console.error('Categorization failed:', err);
-    // Continua com LEMBRETES — não bloqueia o fluxo
   }
 
-  // --- Grava no Supabase ---
-  // FIX Phase 2 closure: agora salva também o metadata JSONB extraído pelo GPT
-  // (shopping_items, date_text, time_text, person, recurrence, action_summary, etc.)
-  // Isso é pré-requisito do Phase 4 (cron vai depender desses campos).
+  // Grava no Supabase
   try {
     await saveToSupabase({
       phone_number: phoneNumber,
@@ -143,20 +280,87 @@ async function processMessage(body) {
     console.error('Supabase save failed:', err);
   }
 
-  // --- Envia confirmação de volta ao usuário ---
+  // Gera reply DINÂMICO com persona via GPT
   try {
+    const reply = await generateReply(user, {
+      category,
+      metadata,
+      originalText
+    });
+    await sendWhatsAppReply(phoneNumber, reply);
+    console.log('Persona reply sent to user');
+  } catch (err) {
+    console.error('Persona reply failed, using fallback:', err);
+    // Fallback: template estático antigo
     const emoji = CATEGORY_EMOJI[category] || '📦';
     const preview = originalText.length > 80 ? originalText.substring(0, 80) + '...' : originalText;
-    const replyText = `${emoji} Anotado em ${category}:\n"${preview}"`;
-    await sendWhatsAppReply(phoneNumber, replyText);
-    console.log('Confirmation sent to user');
-  } catch (err) {
-    console.error('Failed to send confirmation:', err);
+    await sendWhatsAppReply(phoneNumber, `${emoji} Anotado em ${category}:\n"${preview}"`);
   }
 }
 
 // ============================================
-// TRANSCRIÇÃO DE ÁUDIO (Whisper)
+// USERS TABLE HELPERS (Supabase)
+// ============================================
+async function fetchUser(phoneNumber) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/users?phone_number=eq.${encodeURIComponent(phoneNumber)}&select=*`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
+  if (!res.ok) {
+    console.error('fetchUser failed:', res.status, await res.text());
+    return null;
+  }
+  const rows = await res.json();
+  return rows?.[0] || null;
+}
+
+async function createUser(phoneNumber) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/users`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      Prefer: 'return=minimal'
+    },
+    body: JSON.stringify({
+      phone_number: phoneNumber,
+      onboarding_state: 'awaiting_name'
+    })
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`createUser failed: ${res.status} ${errText}`);
+  }
+}
+
+async function updateUser(phoneNumber, fields) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/users?phone_number=eq.${encodeURIComponent(phoneNumber)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        Prefer: 'return=minimal'
+      },
+      body: JSON.stringify(fields)
+    }
+  );
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`updateUser failed: ${res.status} ${errText}`);
+  }
+}
+
+// ============================================
+// TRANSCRIÇÃO DE ÁUDIO (Whisper) — inalterado do Phase 2
 // ============================================
 async function transcribeAudio(mediaId) {
   // Passo 1: pedir à Meta a URL de download do arquivo
@@ -180,8 +384,6 @@ async function transcribeAudio(mediaId) {
   formData.append('file', new Blob([audioBuffer], { type: 'audio/ogg' }), 'audio.ogg');
   formData.append('model', 'whisper-1');
   formData.append('language', 'pt');
-  // Prompt de vocabulário: ajuda o Whisper a transcrever nomes próprios
-  // e termos recorrentes corretamente (ex: "Luigi" não vira "Luídio").
   formData.append('prompt', 'Nomes: Luigi, Antonella, Victor, Suelen. Memo assistente. Termos: Tesco, mercado, escola, dentista, consulta, farmácia, GP, boleto, mensalidade, pilates, academia, futebol.');
 
   const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -198,7 +400,7 @@ async function transcribeAudio(mediaId) {
 }
 
 // ============================================
-// CATEGORIZAÇÃO (GPT-4o-mini com saída JSON estruturada)
+// CATEGORIZAÇÃO (GPT-4o-mini JSON) — inalterado do Phase 2
 // ============================================
 async function categorize(text) {
   const systemPrompt = `Você é o cérebro de categorização do Memo, um assistente de WhatsApp pra pais brasileiros/UK gerenciarem a vida doméstica.
@@ -305,7 +507,6 @@ Responda APENAS com o JSON, nada mais.`;
   const data = await res.json();
   const raw = data.choices?.[0]?.message?.content || '{}';
 
-  // Parse JSON — se falhar, cai em LEMBRETES com low confidence
   let parsed;
   try {
     parsed = JSON.parse(raw);
@@ -314,11 +515,9 @@ Responda APENAS com o JSON, nada mais.`;
     return { category: 'LEMBRETES', metadata: { confidence: 'low', needs_review: true, parse_error: true } };
   }
 
-  // Valida: se o GPT retornar algo fora da lista, cai pra LEMBRETES (fallback seguro)
   const rawCategory = (parsed.category || '').toUpperCase();
   const category = VALID_CATEGORIES.includes(rawCategory) ? rawCategory : 'LEMBRETES';
 
-  // Metadata: tudo menos a categoria (que já sai separado)
   const metadata = {
     confidence: parsed.confidence || 'medium',
     needs_review: parsed.needs_review || false,
@@ -335,7 +534,7 @@ Responda APENAS com o JSON, nada mais.`;
 }
 
 // ============================================
-// SALVAR NO SUPABASE
+// SALVAR NO SUPABASE — inalterado do Phase 2
 // ============================================
 async function saveToSupabase(data) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/messages`, {
@@ -355,7 +554,80 @@ async function saveToSupabase(data) {
 }
 
 // ============================================
-// ENVIAR RESPOSTA VIA WHATSAPP
+// GENERATE REPLY COM PERSONA (Phase 3) — GPT-4o-mini, temperature alta
+// Substitui o template fixo do Phase 2 por reply dinâmico.
+// ============================================
+async function generateReply(user, context) {
+  const persona = user?.persona || 'ceo';
+  const memoName = user?.memo_name || 'Memo';
+  const basePrompt = PERSONA_PROMPTS[persona] || PERSONA_PROMPTS.ceo;
+  const systemPrompt = basePrompt.replace(/\{MEMO_NAME\}/g, memoName);
+
+  let userContent;
+
+  if (context.isWelcome) {
+    // Primeira fala após onboarding — boas-vindas no tom da persona
+    userContent = `[EVENTO: Onboarding concluído. O usuário acabou de escolher você como persona. Esta é sua primeira fala oficial — dê boas-vindas e diga que está pronto pra receber qualquer coisa (conta, compra, compromisso, recado, lembrete). Máximo 2 frases. Use a persona 100%. NÃO use template — gere algo único.]`;
+  } else {
+    // Confirmação de captura normal
+    const { category, metadata, originalText } = context;
+    const summary = metadata?.action_summary || originalText;
+    const person = metadata?.person || null;
+    const dateText = metadata?.date_text || null;
+    const timeText = metadata?.time_text || null;
+
+    userContent = `[EVENTO: O usuário acabou de registrar um item no sistema.
+
+Mensagem original do usuário: "${originalText}"
+Categoria atribuída: ${category}
+Resumo da ação: ${summary}
+Pessoa mencionada: ${person || 'nenhuma'}
+Data: ${dateText || 'não especificada'}
+Horário: ${timeText || 'não especificado'}
+
+Sua tarefa: confirmar o registro em 1-2 frases NO SEU TOM DE PERSONA.
+
+REGRAS CRÍTICAS:
+- NUNCA use template fixo. O usuário vai receber dezenas dessas por semana — repetição mata a magia.
+- Varie completamente a estrutura, abertura, ritmo, escolha de palavras.
+- Mencione a categoria de forma natural, nunca como label ([${category}]).
+- Se a mensagem tiver pessoa/data/hora relevante, incorpore naturalmente.
+- Seja surpreendente dentro do seu tom — não previsível.
+- Persona acima de tudo.]`;
+  }
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent }
+      ],
+      max_tokens: 120,
+      temperature: 0.95, // ALTA pra maximizar variação
+      presence_penalty: 0.6, // penaliza reuso de palavras
+      frequency_penalty: 0.4
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`generateReply GPT failed: ${res.status} ${errText}`);
+  }
+
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error('generateReply: empty response');
+  return text;
+}
+
+// ============================================
+// ENVIAR RESPOSTA VIA WHATSAPP — inalterado
 // ============================================
 async function sendWhatsAppReply(to, text) {
   const res = await fetch(
