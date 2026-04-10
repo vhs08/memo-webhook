@@ -3,8 +3,8 @@
 //         → categoriza com GPT-4o-mini → grava no Supabase → GERA REPLY COM PERSONA via GPT
 // Categorias (5): FINANCAS, COMPRAS, AGENDA, IDEIAS, LEMBRETES
 // Personas (4): alfred, mae, coach, ceo
-// Arquitetura v7: MULTI-TURN few-shot — exemplos como role:assistant na conversa
-// gpt-4o vê exemplos como seus próprios replies e imita o padrão tonal
+// Arquitetura v8: Claude Haiku + MULTI-TURN few-shot
+// Teste: Claude segue persona/voz melhor que GPT em PT-BR?
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -13,6 +13,7 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'memo_verify_2026';
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://xgsioilxmmpmfgndfmar.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
@@ -196,17 +197,38 @@ const CATEGORY_CASE_MAP = {
   LEMBRETES: ['rotina', 'reflexao', 'serio']
 };
 
-// Seleciona até 4 exemplos few-shot para a combinação persona × categoria
-// Mais exemplos multi-turn = âncora tonal mais forte
+// Seleciona 3 exemplos few-shot de TIPOS DIFERENTES para forçar variedade estrutural
+// Em vez de 3 exemplos do mesmo tipo (que vira template), pega 1 de cada tipo diferente
+// Sempre inclui 1 exemplo do tipo relevante + 2 de outros tipos = range da persona
 function selectFewShot(persona, category) {
-  const examples = PERSONA_FEWSHOT[persona] || PERSONA_FEWSHOT.ceo;
-  const caseTypes = CATEGORY_CASE_MAP[category] || ['rotina', 'reflexao'];
+  const allExamples = PERSONA_FEWSHOT[persona] || PERSONA_FEWSHOT.ceo;
+  const relevantTypes = CATEGORY_CASE_MAP[category] || ['rotina', 'reflexao'];
+  const allTypes = ['rotina', 'agenda', 'ideia', 'reflexao', 'financeiro', 'serio'];
   const selected = [];
-  for (const caseType of caseTypes) {
-    const caseExamples = examples[caseType] || [];
-    selected.push(...caseExamples);
+
+  // 1. Pega 1 exemplo do tipo mais relevante pra esta categoria
+  const primaryType = relevantTypes[0];
+  const primaryExamples = allExamples[primaryType] || [];
+  if (primaryExamples.length > 0) {
+    selected.push(primaryExamples[Math.floor(Math.random() * primaryExamples.length)]);
   }
-  return selected.slice(0, 4);
+
+  // 2. Pega 2 exemplos de tipos DIFERENTES (variedade estrutural)
+  const otherTypes = allTypes.filter(t => t !== primaryType);
+  // Embaralha pra não ser sempre os mesmos tipos
+  for (let i = otherTypes.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [otherTypes[i], otherTypes[j]] = [otherTypes[j], otherTypes[i]];
+  }
+  for (const t of otherTypes) {
+    if (selected.length >= 3) break;
+    const typeExamples = allExamples[t] || [];
+    if (typeExamples.length > 0) {
+      selected.push(typeExamples[Math.floor(Math.random() * typeExamples.length)]);
+    }
+  }
+
+  return selected;
 }
 
 // Rótulos legíveis das personas (pra mensagens de onboarding)
@@ -738,10 +760,10 @@ async function saveToSupabase(data) {
 }
 
 // ============================================
-// GENERATE REPLY COM PERSONA (Phase 3 v7) — GPT-4o
-// Arquitetura v7: MULTI-TURN few-shot — exemplos como role:assistant
-// O modelo vê os exemplos como seus próprios replies anteriores
-// e imita o padrão tonal de forma muito mais fiel
+// GENERATE REPLY COM PERSONA (Phase 3 v8) — Claude Haiku
+// Hipótese: Claude segue instrução de persona/voz melhor que GPT em PT-BR
+// Mantém multi-turn few-shot (system + exemplos como assistant turns)
+// API: Anthropic Messages API (não OpenAI)
 // ============================================
 async function generateReply(user, context) {
   const persona = user?.persona || 'ceo';
@@ -750,8 +772,8 @@ async function generateReply(user, context) {
   const systemPrompt = basePrompt.replace(/\{MEMO_NAME\}/g, memoName);
   const personaExamples = PERSONA_FEWSHOT[persona] || PERSONA_FEWSHOT.ceo;
 
-  // Monta array de messages — system + few-shot multi-turn + mensagem real
-  const messages = [{ role: 'system', content: systemPrompt }];
+  // Monta array de messages (user/assistant turns — system vai separado no Claude)
+  const messages = [];
 
   if (context.isWelcome) {
     // Welcome: injeta exemplos de boas-vindas como turns anteriores
@@ -764,12 +786,11 @@ async function generateReply(user, context) {
   } else {
     // Confirmação: few-shot multi-turn com exemplos da categoria
     const { category, metadata, originalText } = context;
-    const summary = metadata?.action_summary || originalText;
     const person = metadata?.person || null;
     const dateText = metadata?.date_text || null;
     const timeText = metadata?.time_text || null;
 
-    // Injeta 2-3 exemplos como conversa real (user → assistant)
+    // Injeta exemplos como conversa real (user → assistant)
     const examples = selectFewShot(persona, category);
     for (const ex of examples) {
       messages.push({ role: 'user', content: ex.input });
@@ -787,29 +808,30 @@ async function generateReply(user, context) {
     messages.push({ role: 'user', content: realMessage });
   }
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  // Claude Messages API — system prompt vai como campo separado
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENAI_API_KEY}`
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: 'gpt-4o',
+      model: 'claude-haiku-4-5-20251001',
+      system: systemPrompt,
       messages,
       max_tokens: 150,
-      temperature: 0.85,
-      presence_penalty: 0.7,
-      frequency_penalty: 0.5
+      temperature: 0.85
     })
   });
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`generateReply GPT failed: ${res.status} ${errText}`);
+    throw new Error(`generateReply Claude failed: ${res.status} ${errText}`);
   }
 
   const data = await res.json();
-  const text = data.choices?.[0]?.message?.content?.trim();
+  const text = data.content?.[0]?.text?.trim();
   if (!text) throw new Error('generateReply: empty response');
   return text;
 }
