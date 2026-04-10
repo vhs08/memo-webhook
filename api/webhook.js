@@ -788,7 +788,7 @@ Responda no tom dos exemplos. Varie abertura e estrutura.`;
       Authorization: `Bearer ${OPENAI_API_KEY}`
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent }
