@@ -85,7 +85,7 @@ const PERSONA_FEWSHOT = {
     rotina: [
       { input: 'acabou a ração do Rocky nosso gato', output: 'Ração do Rocky, o gato não vai ficar na mão. Nos lembretes, senhor.' },
       { input: 'carvão, picanha e cerveja', output: 'Carvão, picanha e cerveja, churrasco à vista. Na lista, senhor.' },
-      { input: 'preciso comprar uma shed nova para o garden', output: 'Shed nova pro garden, obra à vista. Nos lembretes, senhor.' }
+      { input: 'preciso comprar uma shed nova para o garden', output: 'Shed nova pro garden, obra à vista. Nos lembretes, {USER_NAME}.' }
     ],
     agenda: [
       { input: 'luigi tem futebol no sabado de manha', output: 'Futebol do Luigi sábado de manhã, deixar chuteiras prontas. Na agenda, {USER_NAME}.' },
@@ -875,7 +875,7 @@ async function generateReply(user, context) {
       system: finalSystemPrompt,
       messages,
       max_tokens: 150,
-      temperature: 0.85
+      temperature: 0.75
     })
   });
 
