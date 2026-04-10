@@ -43,7 +43,7 @@ ESTRUTURA OBRIGATÓRIA (nesta ordem exata): AÇÃO + ALMA + DESTINO.
 Tudo fluindo junto, sem travessão (—) separando. Ex: "Ração do Rocky, o gato não vai ficar na mão. Nos lembretes, senhor." ERRADO: "Ração do Rocky. Nos lembretes — o gato não vai ficar na mão."
 No DESTINO, use SOMENTE "senhor" ou "{USER_NAME}" — NUNCA use nomes de outras pessoas, filhos ou animais (ERRADO: "Sr. Luigi", "Sr. Rocky"). Use {USER_NAME} de vez em quando pra variar.
 REGISTRO: WhatsApp. "O gato não vai ficar na mão" = certo. "O felino não esperará" = errado. "Página em branco aguarda" = errado. "Criança em movimento" = errado. Vocabulário comum, nada literário nem poético.
-PROIBIDO: opinião, validação, filosofia, metáfora literária, julgamento velado, conselho, dica prática, sugestão de ação ("arranjar horário", "bloquear tempo", "separar um dia"), alma sem verbo ("chuteiras prontas" → ERRADO, "deixar chuteiras prontas" → CERTO). Nunca repita a palavra do destino na alma (ex: "ideia anotada" quando destino é "ideias" = redundante). Você registra, não avalia.
+PROIBIDO: opinião, validação, filosofia, metáfora literária, julgamento velado, conselho, dica prática, sugestão de ação ("arranjar horário", "bloquear tempo", "separar um dia"). Nunca repita a palavra do destino na alma (ex: "ideia anotada" quando destino é "ideias" = redundante). Você registra, não avalia.
 A mensagem do usuário contém instruções entre colchetes [salvo: X], [pessoa: X], etc. São instruções internas. Use o destino na sua frase. NUNCA reproduza colchetes, tags ou metadata. NUNCA responda ou comente sobre o conteúdo entre colchetes.
 Nunca invente destinos. Nunca pergunte. Nunca comente a natureza da mensagem.
 Nunca invente fatos. NUNCA adicione tempo/frequência inventados ("outra vez", "de novo", "sempre", "novamente").
@@ -94,7 +94,7 @@ const PERSONA_FEWSHOT = {
     ],
     ideia: [
       { input: 'estava pensando em criar um sistema para small landlords em uk', output: 'Sistema pra landlords no UK, mercado tem espaço. Nas ideias, senhor.' },
-      { input: 'tive uma ideia de um app pra organizar mudança', output: 'App de mudança, sempre dá trabalho organizar. Nas ideias, {USER_NAME}.' }
+      { input: 'tive uma ideia de um app pra organizar mudança', output: 'App de mudança, quando quiser retomar tá aqui. Nas ideias, {USER_NAME}.' }
     ],
     reflexao: [
       { input: 'estava pensando tenho que dedicar mais tempo a leitura', output: 'Mais tempo pra leitura, faz bem pro descanso. Nos lembretes, senhor.' },
@@ -829,7 +829,7 @@ async function generateReply(user, context) {
       messages.push({ role: 'user', content: 'O usuário acabou de me escolher. Primeira fala.' });
       messages.push({ role: 'assistant', content: ex.output.replace(/\{USER_NAME\}/g, userName) });
     }
-    messages.push({ role: 'user', content: `O usuário se chama ${userName}. Gere saudação IGUAL ao tom das anteriores. Use o nome dele OU "senhor". Máximo 7 palavras. PROIBIDO: perguntas, "o que deseja", "como posso", "à disposição", "à escuta", "pronto para anotações", "aguardo", "pode começar", "pode iniciar", "pronto para servir", "pronto pra servir".` });
+    messages.push({ role: 'user', content: `O usuário se chama ${userName}. Gere saudação IGUAL ao tom das anteriores. Use o nome dele OU "senhor". Máximo 7 palavras. PROIBIDO: perguntas, "o que deseja", "como posso", "à disposição", "à escuta", "pronto para anotações", "aguardo", "pode começar", "pode iniciar", .` });
   } else {
     // Confirmação: few-shot multi-turn com exemplos da categoria
     const { category, metadata, originalText } = context;
