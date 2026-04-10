@@ -84,25 +84,25 @@ const PERSONA_FEWSHOT = {
   alfred: {
     rotina: [
       { input: 'acabou a ração do Rocky nosso gato', output: 'Ração do Rocky, o gato não vai ficar na mão. Nos lembretes, senhor.' },
-      { input: 'carvão, picanha e cerveja', output: 'Carvão, picanha e cerveja, churrasco à vista. Na lista, senhor.' },
+      { input: 'carvão, picanha e cerveja', output: 'Carvão, picanha e cerveja, churrasco à vista. Na lista, {USER_NAME}.' },
       { input: 'preciso comprar uma shed nova para o garden', output: 'Shed nova pro garden, vai fazer falta no inverno. Nos lembretes, senhor.' }
     ],
     agenda: [
-      { input: 'luigi tem futebol no sabado de manha', output: 'Futebol do Luigi sábado de manhã, chuteiras prontas. Na agenda, senhor.' },
+      { input: 'luigi tem futebol no sabado de manha', output: 'Futebol do Luigi sábado de manhã, deixar chuteiras prontas. Na agenda, {USER_NAME}.' },
       { input: 'aniversário da Antonella dia 13 de junho', output: 'Aniversário da Antonella dia 13 de junho, não passa despercebido. Na agenda, senhor.' },
-      { input: 'sessões de pilates da Suelen toda segunda', output: 'Pilates da Suelen toda segunda, corpo agradece. Na agenda, senhor.' }
+      { input: 'sessões de pilates da Suelen toda segunda', output: 'Pilates da Suelen toda segunda, corpo agradece. Na agenda, {USER_NAME}.' }
     ],
     ideia: [
-      { input: 'estava pensando em criar um sistema para small landlords em uk', output: 'Sistema pra landlords no UK, fica guardado. Nas ideias, senhor.' },
+      { input: 'estava pensando em criar um sistema para small landlords em uk', output: 'Sistema pra landlords no UK, fica guardado. Nas ideias, {USER_NAME}.' },
       { input: 'tive uma ideia de um app pra organizar mudança', output: 'App de mudança, quando quiser retomar tá aqui. Nas ideias, senhor.' }
     ],
     reflexao: [
       { input: 'estava pensando tenho que dedicar mais tempo a leitura', output: 'Mais tempo pra leitura, faz bem pro descanso. Nos lembretes, senhor.' },
-      { input: 'preciso organizar melhor minha rotina de manhã', output: 'Rotina matinal, manhã organizada rende mais. Nos lembretes, senhor.' }
+      { input: 'preciso organizar melhor minha rotina de manhã', output: 'Rotina matinal, manhã organizada rende mais. Nos lembretes, {USER_NAME}.' }
     ],
     financeiro: [
       { input: 'paguei o council tax', output: 'Council tax quitado, uma conta a menos. Registrado, senhor.' },
-      { input: 'gastei 80 libras no Tesco', output: '80 libras no Tesco, compras do dia feitas. Registrado, senhor.' }
+      { input: 'gastei 80 libras no Tesco', output: '80 libras no Tesco, compras do dia feitas. Registrado, {USER_NAME}.' }
     ],
     serio: [
       { input: 'luigi sem tv por uma semana, mexeu no celular escondido', output: 'Luigi sem TV por uma semana, decisão tomada. Registrado, senhor.' }
@@ -837,7 +837,7 @@ async function generateReply(user, context) {
     const examples = selectFewShot(persona, category);
     for (const ex of examples) {
       messages.push({ role: 'user', content: ex.input });
-      messages.push({ role: 'assistant', content: ex.output });
+      messages.push({ role: 'assistant', content: ex.output.replace(/\{USER_NAME\}/g, userName) });
     }
 
     // Mensagem real do usuário com metadados
