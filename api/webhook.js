@@ -49,7 +49,7 @@ A mensagem do usuário pode conter instruções entre colchetes [pessoa: X], [da
 Nunca pergunte. Nunca comente a natureza da mensagem.
 Nunca invente fatos. NUNCA adicione tempo/frequência inventados ("outra vez", "de novo", "sempre", "novamente").
 1 frase, 8-18 palavras. Termine com ponto final.
-NUNCA USE: devidamente, certamente, entendido, auxiliar, conforme indicado, importante mesmo, à sua disposição, ao seu dispor, o que deseja, estou à escuta, aguardo suas ordens.
+NUNCA USE: devidamente, certamente, entendido, auxiliar, conforme indicado, importante mesmo, à sua disposição, ao seu dispor, o que deseja, estou à escuta, aguardo suas ordens, "não espera" (muleta), "precisa comparar", "desempenho" (etiqueta solta).
 Não mencione categorias como labels.`,
 
   mae: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Inspiração: mãe real de WhatsApp — cuida, anota, fala com carinho natural.
@@ -142,6 +142,15 @@ const PERSONA_FEWSHOT = {
       { input: 'luigi reclamou de dor no pescoço', output: 'Dor no pescoço do Luigi, isso pede olho.' },
       { input: 'marcar vacina da gripe pra suelen', output: 'Vacina da gripe da Suelen, inverno britânico não brinca muito.' },
       { input: 'consulta no GP pra mim sexta às 9h30', output: 'Consulta no GP sexta às 9h30, NHS gosta de pontualidade.' }
+    ],
+    conquista: [
+      { input: 'luigi tirou nota boa em maths', output: 'Nota boa do Luigi em maths, isso fica no registro.' },
+      { input: 'antonella aprendeu a escrever o nome dela', output: 'Antonella escrevendo o nome, marco desse tamanho se guarda.' },
+      { input: 'aniversário de casamento nosso dia 15', output: 'Aniversário de casamento dia 15, data dessa não se perde.' }
+    ],
+    hobby: [
+      { input: 'luigi quer aprender a tocar violão', output: 'Violão pro Luigi, casa vai ganhar trilha sonora.' },
+      { input: 'quero começar a correr de manhã', output: 'Corrida de manhã, tênis na porta facilita a saída.' }
     ],
     serio: [
       { input: 'luigi sem tv por uma semana, mexeu no celular escondido', output: 'Luigi sem TV por uma semana, decisão tomada.' }
@@ -262,8 +271,8 @@ const CATEGORY_CASE_MAP = {
   FINANCAS: ['financeiro', 'rotina'],
   COMPRAS: ['compras', 'rotina'],
   AGENDA: ['agenda', 'atividade', 'social'],
-  IDEIAS: ['ideia', 'reflexao'],
-  LEMBRETES: ['rotina', 'domestico', 'saude', 'veiculo', 'trabalho']
+  IDEIAS: ['ideia', 'reflexao', 'hobby'],
+  LEMBRETES: ['rotina', 'domestico', 'saude', 'veiculo', 'trabalho', 'conquista']
 };
 
 // Seleciona 3 exemplos few-shot garantindo cobertura dos tipos relevantes
@@ -272,7 +281,7 @@ const CATEGORY_CASE_MAP = {
 function selectFewShot(persona, category) {
   const allExamples = PERSONA_FEWSHOT[persona] || PERSONA_FEWSHOT.ceo;
   const relevantTypes = CATEGORY_CASE_MAP[category] || ['rotina', 'reflexao'];
-  const allTypes = ['rotina', 'domestico', 'agenda', 'atividade', 'ideia', 'reflexao', 'financeiro', 'serio', 'saude', 'veiculo', 'social', 'trabalho', 'compras'];
+  const allTypes = ['rotina', 'domestico', 'agenda', 'atividade', 'ideia', 'reflexao', 'financeiro', 'serio', 'saude', 'veiculo', 'social', 'trabalho', 'compras', 'conquista', 'hobby'];
   const selected = [];
   const usedTypes = new Set();
 
