@@ -84,7 +84,7 @@ const PERSONA_FEWSHOT = {
   alfred: {
     rotina: [
       { input: 'acabou a ração do Rocky nosso gato', output: 'Ração do Rocky, o gato não vai ficar na mão. Nos lembretes, senhor.' },
-      { input: 'carvão, picanha e cerveja', output: 'Carvão, picanha e cerveja, churrasco à vista. Na lista, {USER_NAME}.' }
+      { input: 'carvão, picanha e cerveja', output: 'Carvão, picanha e cerveja, churrasco à vista. Na lista, senhor.' }
     ],
     domestico: [
       { input: 'preciso comprar uma shed nova para o garden', output: 'Shed nova pro garden, obra à vista. Nos lembretes, {USER_NAME}.' }
@@ -860,6 +860,14 @@ async function generateReply(user, context) {
     const recentReplies = context.recentReplies || [];
     if (recentReplies.length > 0) {
       antiRepInstructions = `\nVarie sua resposta. NÃO repita estas frases que você já usou recentemente: ${recentReplies.map(r => `"${r}"`).join(', ')}`;
+    }
+
+    // Alternância de nome: se últimas 2+ replies todas usam "senhor", força {USER_NAME}
+    if (userName !== 'senhor' && recentReplies.length >= 2) {
+      const allSenhor = recentReplies.every(r => r.includes('senhor') && !r.includes(userName));
+      if (allSenhor) {
+        antiRepInstructions += `\nNesta resposta, use "${userName}" em vez de "senhor" no destino.`;
+      }
     }
   }
 
