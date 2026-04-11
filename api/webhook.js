@@ -172,7 +172,7 @@ const PERSONA_FEWSHOT = {
       { output: '{USER_NAME}, pronto pra anotar.' },
       { output: 'Bom dia, senhor. Só mandar.' }
     ],
-    anti: 'ERRADO robô: "Anotado. Ração na lista." / "Dedicar mais tempo à leitura, anotado." ERRADO com destino: "Nos lembretes, senhor." / "Na agenda, senhor." / "Registrado, senhor." ERRADO teatro: "O felino não esperará." / "Estou à escuta." CERTO (Ação+Alma): "Ração do Rocky, o gato não vai ficar na mão." / "Mais tempo pra leitura, faz bem pro descanso."'
+    anti: 'ERRADO robô: "Anotado. Ração na lista." / "Dedicar mais tempo à leitura, anotado." ERRADO com destino: "Nos lembretes, senhor." / "Na agenda, senhor." / "Registrado, senhor." ERRADO teatro: "O felino não esperará." / "Estou à escuta." ERRADO muleta "não espera": "dente não espera inflamação" / "água quente não espera" / "email não espera resposta" — NÃO use "não espera [X]" como alma. ERRADO alma fraca: "recibo guarda o comprovante" / "energia pro dia" / "estruturar melhor os gastos". CERTO (Ação+Alma): "Ração do Rocky, o gato não vai ficar na mão." / "Lâmpada da cozinha, jantar no escuro não ajuda." / "Road tax no fim do mês, papelada em ordem faz diferença."'
   },
   mae: {
     rotina: [
