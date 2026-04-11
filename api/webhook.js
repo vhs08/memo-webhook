@@ -559,26 +559,36 @@ async function processMessage(body) {
     const closingWords = ['Anotado', 'Registrado'];
     const closingWord = closingWords[Math.floor(Math.random() * closingWords.length)];
 
-    // Determina posição no ciclo: senhor → limpo → nome → senhor → ...
+    // Determina posição no ciclo: senhor → limpo → nome → limpo → senhor → ...
+    // 50% com fechamento, 50% sem — mais ar pra alma respirar
     let closing = '';
-    if (recentReplies.length >= 1) {
+    if (recentReplies.length >= 2) {
       const lastReply = recentReplies[recentReplies.length - 1];
-      const lastHasName = displayName !== 'senhor' && lastReply.includes(displayName);
-      const lastHasSenhor = lastReply.includes('senhor');
+      const prevReply = recentReplies[recentReplies.length - 2];
       const lastHasClosing = lastReply.includes('Anotado') || lastReply.includes('Registrado');
+      const prevHasClosing = prevReply.includes('Anotado') || prevReply.includes('Registrado');
+      const lastHasName = displayName !== 'senhor' && lastReply.includes(displayName);
 
-      if (lastHasSenhor && lastHasClosing) {
-        // Após "Anotado, senhor" → sem fechamento (limpo)
+      if (lastHasClosing) {
+        // Após fechamento → limpo
         closing = '';
-      } else if (!lastHasClosing) {
-        // Após limpo → com nome
+      } else if (prevHasClosing && prevReply.includes('senhor') && !lastHasClosing) {
+        // senhor foi o último fechamento → agora limpo → próximo será nome
         closing = displayName !== 'senhor'
           ? ` ${closingWord}, ${displayName}.`
           : ` ${closingWord}, senhor.`;
-      } else {
-        // Após nome → com senhor
+      } else if (!lastHasClosing && !prevHasClosing) {
+        // Duas limpas seguidas → hora de fechar com senhor
         closing = ` ${closingWord}, senhor.`;
+      } else {
+        // Default: limpo
+        closing = '';
       }
+    } else if (recentReplies.length === 1) {
+      const lastReply = recentReplies[recentReplies.length - 1];
+      const lastHasClosing = lastReply.includes('Anotado') || lastReply.includes('Registrado');
+      // Se última teve fechamento → limpo. Se não → fecha com senhor.
+      closing = lastHasClosing ? '' : ` ${closingWord}, senhor.`;
     } else {
       // Primeira mensagem → com senhor
       closing = ` ${closingWord}, senhor.`;
