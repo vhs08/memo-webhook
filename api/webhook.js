@@ -474,13 +474,21 @@ async function processMessage(body) {
       recentReplies
     });
 
-    // Post-processing: alterna senhor/nome a cada 2 respostas
+    // Post-processing: ciclo senhor → limpo → nome → senhor → limpo → nome
     const displayName = user?.user_display_name || 'senhor';
-    if (displayName !== 'senhor' && recentReplies.length >= 2) {
-      const allSenhor = recentReplies.every(r => r.includes('senhor') && !r.includes(displayName));
-      if (allSenhor && reply.includes('senhor')) {
+    if (displayName !== 'senhor' && recentReplies.length >= 1) {
+      const lastReply = recentReplies[recentReplies.length - 1];
+      const lastHasName = lastReply.includes(displayName);
+      const lastHasSenhor = lastReply.includes('senhor') && !lastHasName;
+
+      if (lastHasSenhor) {
+        // Após senhor → limpo (tira senhor)
+        reply = reply.replace(/,\s*senhor\.\s*$/, '.');
+      } else if (!lastHasName && !lastHasSenhor) {
+        // Após limpo → nome
         reply = reply.replace(/senhor\.\s*$/, `${displayName}.`);
       }
+      // Após nome → senhor (default, modelo já gera senhor)
     }
 
     await sendWhatsAppReply(phoneNumber, reply);
