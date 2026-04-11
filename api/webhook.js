@@ -467,12 +467,22 @@ async function processMessage(body) {
 
   // Gera reply DINÂMICO com persona via GPT
   try {
-    const reply = await generateReply(user, {
+    let reply = await generateReply(user, {
       category,
       metadata,
       originalText,
       recentReplies
     });
+
+    // Post-processing: alterna senhor/nome a cada 2 respostas
+    const displayName = user?.user_display_name || 'senhor';
+    if (displayName !== 'senhor' && recentReplies.length >= 2) {
+      const allSenhor = recentReplies.every(r => r.includes('senhor') && !r.includes(displayName));
+      if (allSenhor && reply.includes('senhor')) {
+        reply = reply.replace(/senhor\.\s*$/, `${displayName}.`);
+      }
+    }
+
     await sendWhatsAppReply(phoneNumber, reply);
     console.log('Persona reply sent to user');
 
@@ -862,13 +872,6 @@ async function generateReply(user, context) {
       antiRepInstructions = `\nVarie sua resposta. NÃO repita estas frases que você já usou recentemente: ${recentReplies.map(r => `"${r}"`).join(', ')}`;
     }
 
-    // Alternância de nome: se últimas 2+ replies todas usam "senhor", força {USER_NAME}
-    if (userName !== 'senhor' && recentReplies.length >= 2) {
-      const allSenhor = recentReplies.every(r => r.includes('senhor') && !r.includes(userName));
-      if (allSenhor) {
-        antiRepInstructions += `\nNesta resposta, use "${userName}" em vez de "senhor" no destino.`;
-      }
-    }
   }
 
   // Injeta anti-repetição no system prompt (não na mensagem do usuário)
