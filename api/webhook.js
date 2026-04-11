@@ -90,9 +90,11 @@ const PERSONA_FEWSHOT = {
       { input: 'preciso comprar uma shed nova para o garden', output: 'Shed nova pro garden, obra à vista. Nos lembretes, {USER_NAME}.' }
     ],
     agenda: [
-      { input: 'luigi tem futebol no sabado de manha', output: 'Futebol do Luigi sábado de manhã, deixar chuteiras prontas. Na agenda, {USER_NAME}.' },
       { input: 'aniversário da Antonella dia 13 de junho', output: 'Aniversário da Antonella dia 13 de junho, não passa despercebido. Na agenda, senhor.' },
       { input: 'sessões de pilates da Suelen toda segunda', output: 'Pilates da Suelen toda segunda, corpo agradece. Na agenda, senhor.' }
+    ],
+    atividade: [
+      { input: 'luigi tem futebol no sabado de manha', output: 'Futebol do Luigi sábado de manhã, deixar chuteiras prontas. Na agenda, {USER_NAME}.' }
     ],
     ideia: [
       { input: 'estava pensando em criar um sistema para small landlords em uk', output: 'Sistema pra landlords no UK, mercado tem espaço. Nas ideias, senhor.' },
@@ -203,7 +205,7 @@ const PERSONA_FEWSHOT = {
 const CATEGORY_CASE_MAP = {
   FINANCAS: ['financeiro', 'rotina'],
   COMPRAS: ['rotina'],
-  AGENDA: ['agenda'],
+  AGENDA: ['agenda', 'atividade'],
   IDEIAS: ['ideia', 'reflexao'],
   LEMBRETES: ['rotina', 'domestico', 'reflexao']
 };
@@ -214,7 +216,7 @@ const CATEGORY_CASE_MAP = {
 function selectFewShot(persona, category) {
   const allExamples = PERSONA_FEWSHOT[persona] || PERSONA_FEWSHOT.ceo;
   const relevantTypes = CATEGORY_CASE_MAP[category] || ['rotina', 'reflexao'];
-  const allTypes = ['rotina', 'domestico', 'agenda', 'ideia', 'reflexao', 'financeiro', 'serio'];
+  const allTypes = ['rotina', 'domestico', 'agenda', 'atividade', 'ideia', 'reflexao', 'financeiro', 'serio'];
   const selected = [];
   const usedTypes = new Set();
 
