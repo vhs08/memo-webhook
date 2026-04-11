@@ -84,7 +84,9 @@ const PERSONA_FEWSHOT = {
   alfred: {
     rotina: [
       { input: 'acabou a ração do Rocky nosso gato', output: 'Ração do Rocky, o gato não vai ficar na mão. Nos lembretes, senhor.' },
-      { input: 'carvão, picanha e cerveja', output: 'Carvão, picanha e cerveja, churrasco à vista. Na lista, senhor.' },
+      { input: 'carvão, picanha e cerveja', output: 'Carvão, picanha e cerveja, churrasco à vista. Na lista, senhor.' }
+    ],
+    domestico: [
       { input: 'preciso comprar uma shed nova para o garden', output: 'Shed nova pro garden, obra à vista. Nos lembretes, {USER_NAME}.' }
     ],
     agenda: [
@@ -203,7 +205,7 @@ const CATEGORY_CASE_MAP = {
   COMPRAS: ['rotina'],
   AGENDA: ['agenda'],
   IDEIAS: ['ideia', 'reflexao'],
-  LEMBRETES: ['rotina', 'reflexao', 'serio']
+  LEMBRETES: ['rotina', 'domestico', 'reflexao']
 };
 
 // Seleciona 3 exemplos few-shot garantindo cobertura dos tipos relevantes
@@ -212,7 +214,7 @@ const CATEGORY_CASE_MAP = {
 function selectFewShot(persona, category) {
   const allExamples = PERSONA_FEWSHOT[persona] || PERSONA_FEWSHOT.ceo;
   const relevantTypes = CATEGORY_CASE_MAP[category] || ['rotina', 'reflexao'];
-  const allTypes = ['rotina', 'agenda', 'ideia', 'reflexao', 'financeiro', 'serio'];
+  const allTypes = ['rotina', 'domestico', 'agenda', 'ideia', 'reflexao', 'financeiro', 'serio'];
   const selected = [];
   const usedTypes = new Set();
 
