@@ -53,7 +53,12 @@ Use "pra/pro", tom WhatsApp informal de executivo.`,
       { type: 'reminder_tomorrow', entity: 'Consulta no GP 9h30', output: 'Consulta no GP amanhã 9h30. NHS não espera.' },
       { type: 'reminder_tomorrow', entity: 'Pagar council tax', output: 'Council tax vence amanhã. Resolve hoje.' },
       { type: 'reminder_today', entity: 'Seguro do carro vence hoje', output: 'Seguro do carro vence hoje. Não deixa passar.' },
-      { type: 'reminder_tomorrow', entity: 'Apresentação do Luigi na escola 14h', output: 'Apresentação do Luigi amanhã às 14h. Roupa pronta na noite anterior.' }
+      { type: 'reminder_tomorrow', entity: 'Apresentação do Luigi na escola 14h', output: 'Apresentação do Luigi amanhã às 14h. Roupa pronta na noite anterior.' },
+      { type: 'followup', entity: 'Pagar TV licence', output: 'TV licence — já resolveu?' },
+      { type: 'followup', entity: 'Comprar ração do Rocky', output: 'Ração do Rocky. Comprou ou o gato tá passando fome?' },
+      { type: 'followup', entity: 'Marcar consulta no GP', output: 'Consulta no GP. Conseguiu marcar?' },
+      { type: 'followup', entity: 'Renovar parking permit', output: 'Parking permit. Já renovou?' },
+      { type: 'followup', entity: 'Pagar mensalidade do futebol do Luigi', output: 'Mensalidade do futebol do Luigi. Já pagou?' }
     ]
   },
   tiolegal: {
@@ -70,7 +75,12 @@ Use "pra/pro", tom WhatsApp informal de tio.`,
       { type: 'reminder_tomorrow', entity: 'Consulta no GP 9h30', output: 'Consulta no GP amanhã 9h30. Marcou no NHS, não perde.' },
       { type: 'reminder_tomorrow', entity: 'Pagar council tax', output: 'Council tax vence amanhã. Burocracia cobra multa bonita.' },
       { type: 'reminder_today', entity: 'Seguro do carro vence hoje', output: 'Seguro do carro vence hoje. Dirigir sem seguro no UK é aventura cara.' },
-      { type: 'reminder_tomorrow', entity: 'Apresentação do Luigi na escola 14h', output: 'Apresentação do Luigi amanhã às 14h. Roupa arrumada na noite anterior salva a manhã.' }
+      { type: 'reminder_tomorrow', entity: 'Apresentação do Luigi na escola 14h', output: 'Apresentação do Luigi amanhã às 14h. Roupa arrumada na noite anterior salva a manhã.' },
+      { type: 'followup', entity: 'Pagar TV licence', output: 'E a TV licence, pagou? Burocracia cobra multa bonita.' },
+      { type: 'followup', entity: 'Comprar ração do Rocky', output: 'Ração do Rocky — comprou ou o bicho tá organizando protesto?' },
+      { type: 'followup', entity: 'Marcar consulta no GP', output: 'Consulta no GP, marcou? NHS com vaga livre é ouro.' },
+      { type: 'followup', entity: 'Renovar parking permit', output: 'Parking permit, renovou? Fiscal de rua não perdoa.' },
+      { type: 'followup', entity: 'Pagar mensalidade do futebol do Luigi', output: 'Futebol do Luigi, pagou a mensalidade? Craque precisa de campo.' }
     ]
   }
 };
@@ -168,8 +178,37 @@ async function processUser(user, now, ukNow) {
     }
   }
 
-  // ---- 4.3 — FOLLOW-UP DE PENDÊNCIAS (placeholder) ----
-  // TODO: Phase 4.3 — query LEMBRETES com task_status='pending' e due_at passado
+  // ---- 4.3 — FOLLOW-UP DE PENDÊNCIAS ----
+  if (user.followup_enabled !== false && remaining > 0 && !user.pending_followup_id) {
+    const overdue = await getOverdueTasks(phone, now);
+    console.log(`[Cron] ${phone}: ${overdue.length} overdue tasks`);
+
+    // Manda follow-up pro item mais antigo (1 por dia, pra não sobrecarregar)
+    if (overdue.length > 0) {
+      const task = overdue[0];
+
+      // Verificar se já mandou follow-up pra essa task
+      const alreadySent = await wasProactiveSent(phone, 'followup', task.id);
+      if (!alreadySent) {
+        const entity = buildFollowupEntity(task);
+
+        const message = await generateProactiveMessage(user, {
+          type: 'followup',
+          entity: entity
+        });
+
+        if (message) {
+          await sendWhatsAppMessage(phone, message);
+          await logProactive(phone, 'followup', task.id, message);
+          // Marcar no user que estamos esperando resposta pra esse follow-up
+          await updateUserField(phone, 'pending_followup_id', task.id);
+          remaining--;
+          sent++;
+          console.log(`[Cron] ${phone}: sent followup — "${message}"`);
+        }
+      }
+    }
+  }
 
   // ---- 4.7 — DAILY BRIEFING (placeholder) ----
   // TODO: Phase 4.7 — consolidar agenda + pendências do dia em 1 mensagem
@@ -211,6 +250,65 @@ async function getUpcomingEvents(phoneNumber, now) {
 }
 
 // ============================================
+// QUERY: OVERDUE TASKS (4.3)
+// Busca LEMBRETES com task_status='pending' e due_at já passou
+// ============================================
+async function getOverdueTasks(phoneNumber, now) {
+  const ukNow = getUKTime(now);
+
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/messages?phone_number=eq.${encodeURIComponent(phoneNumber)}&category=eq.LEMBRETES&task_status=eq.pending&due_at=lt.${ukNow.toISOString()}&due_at=not.is.null&select=id,original_text,category,metadata,due_at&order=due_at.asc&limit=5`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
+
+  if (!res.ok) {
+    console.error('[Cron] getOverdueTasks failed:', res.status, await res.text());
+    return [];
+  }
+
+  return await res.json();
+}
+
+// ============================================
+// BUILD FOLLOWUP ENTITY — monta descrição da pendência pra prompt
+// ============================================
+function buildFollowupEntity(task) {
+  const meta = task.metadata || {};
+  return meta.action_summary || task.original_text;
+}
+
+// ============================================
+// UPDATE USER FIELD (helper genérico)
+// ============================================
+async function updateUserField(phoneNumber, field, value) {
+  const body = {};
+  body[field] = value;
+
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/users?phone_number=eq.${encodeURIComponent(phoneNumber)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        Prefer: 'return=minimal'
+      },
+      body: JSON.stringify(body)
+    }
+  );
+
+  if (!res.ok) {
+    console.error(`[Cron] updateUserField(${field}) failed:`, res.status, await res.text());
+  }
+}
+
+// ============================================
 // GENERATE PROACTIVE MESSAGE (composição estruturada + Claude)
 // ============================================
 async function generateProactiveMessage(user, context) {
@@ -229,7 +327,10 @@ async function generateProactiveMessage(user, context) {
   }
 
   // Mensagem real
-  messages.push({ role: 'user', content: `Gere lembrete proativo para: ${context.entity}` });
+  const promptPrefix = context.type === 'followup'
+    ? 'Gere follow-up perguntando se o usuário resolveu:'
+    : 'Gere lembrete proativo para:';
+  messages.push({ role: 'user', content: `${promptPrefix} ${context.entity}` });
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
