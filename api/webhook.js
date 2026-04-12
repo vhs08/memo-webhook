@@ -394,7 +394,9 @@ const PERSONA_FEWSHOT = {
       { input: 'bloquear a agenda da Suelen na clínica quarta das 14h às 16h', output: 'Agenda da Suelen quarta, 14h às 16h. Tarde reservada pra clínica.' },
       { input: 'buscar Luigi na escola quinta', output: 'Buscar Luigi quinta. Moleque espera na porta.' },
       { input: 'pegar resultado de exame da Suelen segunda', output: 'Resultado da Suelen segunda. Cedo é melhor, fila de NHS não perdoa.' },
-      { input: 'luigi quer levar o dinossauro pro show and tell sexta', output: 'Show and tell do Luigi sexta. Separa o dinossauro hoje.' }
+      { input: 'luigi quer levar o dinossauro pro show and tell sexta', output: 'Show and tell do Luigi sexta. Separa o dinossauro hoje.' },
+      { input: 'avisa a professora do Luigi que ele chega 15 min atrasado amanhã, dentista', output: 'Mensagem pra professora do Luigi. Dentista amanhã, 15 minutos de atraso.' },
+      { input: 'vê os horários de trem pra Manchester na terça pro Victor', output: 'Trem pra Manchester terça. Pesquisa os horários e manda pro Victor.' }
     ],
     atividade: [
       { input: 'inscrever Luigi na natação', output: 'Natação do Luigi. Vaga enche rápido.' },
@@ -469,6 +471,7 @@ const PERSONA_FEWSHOT = {
       { input: 'comprar pão de queijo congelado pro domingo', output: 'Pão de queijo pro domingo. Coberto.' },
       { input: 'comprar lancheira nova pra Antonella, a dela quebrou', output: 'Lancheira nova da Antonella. Fecho quebrou, precisa antes da escola.' },
       { input: 'passar na farmácia pegar colírio do Victor', output: 'Colírio na farmácia. Olho sem colírio reclama rápido.' },
+      { input: 'comprar presente de 20 euros pra festa de aniversário do amigo do Luigi, menino de 5 anos', output: 'Presente pro amigo do Luigi, 20 euros, menino de 5 anos. Compra antes do sábado.' },
       { input: 'comprar protetor solar pras crianças', output: 'Protetor solar pras crianças. Sol britânico engana, pele não perdoa.' }
     ],
     welcome: [
