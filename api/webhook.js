@@ -1,12 +1,11 @@
-// Memo Assistant — WhatsApp Webhook Handler (Phase 3 — Personas v6)
+// Memo Assistant — WhatsApp Webhook Handler (Phase 4.2 — Proativo)
 // Fluxo: recebe mensagem → (onboarding se user novo) → (áudio vira texto via Whisper)
-//         → categoriza com GPT-4o-mini → grava no Supabase → GERA REPLY COM PERSONA via GPT
+//         → categoriza com GPT-4o-mini → grava no Supabase (com due_at + task_status) → GERA REPLY COM PERSONA via Claude
 // Categorias (5): FINANCAS, COMPRAS, AGENDA, IDEIAS, LEMBRETES
 // Personas ativas (2): ceo (Focado), tiolegal (Descontraído)
-// Alfred e Mãe: código preservado mas fora do onboarding (decisão 2026-04-12)
-// Alfred: nota 7.0 no teste formal. Mãe: nota 8.9, removida por decisão de produto (2 personas mais limpo)
-// Arquitetura v9: Claude Sonnet + MULTI-TURN few-shot
-// Teste: Claude segue persona/voz melhor que GPT em PT-BR?
+// Phase 4: due_at (ISO date) e task_status (pending/done) salvos pra cron proativo
+// Cron separado em api/cron.js — roda diário, manda reminders e follow-ups
+// Arquitetura v10: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -872,11 +871,15 @@ async function processMessage(body) {
   // Categoriza com GPT-4o-mini
   let category = 'LEMBRETES'; // fallback se a API falhar
   let metadata = null;
+  let due_at = null;
+  let task_status = null;
   try {
     const result = await categorize(originalText);
     category = result.category;
     metadata = result.metadata;
-    console.log(`Categorized as: ${category}`);
+    due_at = result.due_at;
+    task_status = result.task_status;
+    console.log(`Categorized as: ${category}${due_at ? ` (due: ${due_at})` : ''}`);
     if (metadata) {
       console.log(`Metadata: ${JSON.stringify(metadata)}`);
     }
@@ -887,16 +890,21 @@ async function processMessage(body) {
   // Paraleliza: saveToSupabase e fetchRecentBotReplies não dependem um do outro
   let recentReplies = [];
   try {
+    const saveData = {
+      phone_number: phoneNumber,
+      message_type: storedType,
+      original_text: originalText,
+      audio_url: audioUrl,
+      category: category,
+      status: 'processed',
+      metadata: metadata
+    };
+    // Phase 4: salvar due_at e task_status se disponíveis
+    if (due_at) saveData.due_at = due_at;
+    if (task_status) saveData.task_status = task_status;
+
     const [_, fetchedReplies] = await Promise.all([
-      saveToSupabase({
-        phone_number: phoneNumber,
-        message_type: storedType,
-        original_text: originalText,
-        audio_url: audioUrl,
-        category: category,
-        status: 'processed',
-        metadata: metadata
-      }).then(() => console.log('Saved to Supabase')),
+      saveToSupabase(saveData).then(() => console.log('Saved to Supabase')),
       fetchRecentBotReplies(phoneNumber, 3)
     ]);
     recentReplies = fetchedReplies || [];
@@ -1143,7 +1151,12 @@ async function transcribeAudio(mediaId) {
 // CATEGORIZAÇÃO (GPT-4o-mini JSON) — inalterado do Phase 2
 // ============================================
 async function categorize(text) {
-  const systemPrompt = `Você é o cérebro de categorização do Memo, um assistente de WhatsApp pra pais brasileiros/UK gerenciarem a vida doméstica.
+  // Data atual pra GPT calcular datas relativas ("amanhã", "sexta", etc.)
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' }); // YYYY-MM-DD
+  const weekday = new Date().toLocaleDateString('pt-BR', { timeZone: 'Europe/London', weekday: 'long' });
+
+  const systemPrompt = `Você é o cérebro de categorização do Memo, um assistente pessoal de WhatsApp.
+HOJE É: ${weekday}, ${today}.
 
 Sua tarefa: ler a mensagem do usuário e devolver um JSON estruturado com a categoria + metadados úteis.
 
@@ -1222,6 +1235,7 @@ EXTRAÇÃO DE METADADOS IMPORTANTES:
 - "recurrence": se a mensagem explicita um padrão de repetição ("todo sábado", "toda semana", "todo dia 5"), capture em linguagem natural. Senão null.
 - "shopping_items": se a mensagem implica itens a comprar (compras pendentes OU compras feitas), extraia a lista de itens como array. Ex: "acabou os ovos" → ["ovos"], "comprar leite e pão" → ["leite", "pão"], "comprei sal e açúcar" → ["sal", "açúcar"]. Senão null.
 - "needs_review": true quando a mensagem é ambígua ou tem dois verbos fortes em categorias diferentes (ex: "marcar dentista e pagar recepção").
+- "due_at_iso": se a mensagem menciona data/hora (explícita ou relativa como "amanhã", "sexta", "dia 20"), calcule a data ISO 8601 completa COM timezone UK. Se só tem data sem hora, use 09:00. Se só tem hora sem data, use HOJE. Se tem recorrência ("todo sábado"), calcule a PRÓXIMA ocorrência. Se não há data nem hora, null. Exemplos: "sexta 14h" → "${today.slice(0,8)}??T14:00:00+01:00", "amanhã" → "...T09:00:00+01:00", "dia 20" → "...T09:00:00+01:00".
 
 FORMATO DA RESPOSTA (JSON válido, sem texto fora):
 {
@@ -1234,7 +1248,8 @@ FORMATO DA RESPOSTA (JSON válido, sem texto fora):
   "time_text": "texto do horário como aparece na mensagem, ou null",
   "recurrence": "padrão de repetição em linguagem natural, ou null",
   "shopping_items": ["item1", "item2"] ou null,
-  "action_summary": "resumo curto da ação em 3-7 palavras"
+  "action_summary": "resumo curto da ação em 3-7 palavras",
+  "due_at_iso": "ISO 8601 com timezone UK, ou null"
 }
 
 Responda APENAS com o JSON, nada mais.`;
@@ -1285,10 +1300,23 @@ Responda APENAS com o JSON, nada mais.`;
     time_text: parsed.time_text || null,
     recurrence: parsed.recurrence || null,
     shopping_items: Array.isArray(parsed.shopping_items) ? parsed.shopping_items : null,
-    action_summary: parsed.action_summary || null
+    action_summary: parsed.action_summary || null,
+    due_at_iso: parsed.due_at_iso || null
   };
 
-  return { category, metadata };
+  // Validar due_at_iso (deve ser parseable como Date)
+  let due_at = null;
+  if (metadata.due_at_iso) {
+    const d = new Date(metadata.due_at_iso);
+    if (!isNaN(d.getTime())) {
+      due_at = d.toISOString();
+    }
+  }
+
+  // task_status: AGENDA e LEMBRETES começam como 'pending', outros null
+  const task_status = (category === 'AGENDA' || category === 'LEMBRETES') ? 'pending' : null;
+
+  return { category, metadata, due_at, task_status };
 }
 
 // ============================================
