@@ -868,6 +868,21 @@ async function processMessage(body) {
   // --- Onboarding completo → fluxo normal de captura ---
   // user.onboarding_state === 'done'
 
+  // --- 4.3: Checar se é resposta a follow-up pendente ---
+  if (user.pending_followup_id) {
+    const followupAction = await classifyFollowupResponse(originalText);
+    console.log(`Follow-up response classified as: ${followupAction}`);
+
+    if (followupAction !== 'new_message') {
+      // É resposta ao follow-up — processar e encerrar
+      await handleFollowupResponse(user, phoneNumber, followupAction, originalText);
+      return;
+    }
+    // Se é new_message, limpa o follow-up pendente e segue pro fluxo normal
+    await updateUser(phoneNumber, { pending_followup_id: null });
+    console.log('Follow-up cleared — treating as new message');
+  }
+
   // Categoriza com GPT-4o-mini
   let category = 'LEMBRETES'; // fallback se a API falhar
   let metadata = null;
@@ -1148,7 +1163,124 @@ async function transcribeAudio(mediaId) {
 }
 
 // ============================================
-// CATEGORIZAÇÃO (GPT-4o-mini JSON) — inalterado do Phase 2
+// 4.3 — FOLLOW-UP RESPONSE CLASSIFIER
+// Classifica resposta curta do usuário a um follow-up proativo
+// ============================================
+async function classifyFollowupResponse(text) {
+  const lower = (text || '').toLowerCase().trim();
+
+  // Pattern matching rápido pra respostas óbvias (evita chamada GPT)
+  const donePatterns = /^(sim|feito|já|ja|fiz|paguei|comprei|marquei|resolvi|resolvido|pronto|ok|beleza|done|yes|yep|fiz sim|já fiz|já paguei|já comprei|já marquei|tá feito|ta feito|foi|mandei)$/i;
+  const snoozePatterns = /^(não|nao|ainda não|ainda nao|depois|amanhã|amanha|semana que vem|mais tarde|no|not yet|vou fazer|vou resolver|ainda|pendente)$/i;
+  const cancelPatterns = /^(cancela|cancelar|esquece|não precisa|nao precisa|remove|tira|desiste|ignora|não quero|nao quero)$/i;
+
+  if (donePatterns.test(lower)) return 'done';
+  if (snoozePatterns.test(lower)) return 'snoozed';
+  if (cancelPatterns.test(lower)) return 'cancelled';
+
+  // Mensagem longa (>60 chars) = provavelmente input novo, não resposta
+  if (lower.length > 60) return 'new_message';
+
+  // Mensagem curta mas ambígua — usar GPT pra classificar
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `O usuário recebeu uma pergunta de follow-up sobre uma pendência (ex: "Você pagou a TV licence?").
+Agora ele respondeu. Classifique a resposta em EXATAMENTE uma das 4 opções:
+- "done" — tarefa foi concluída (sim, feito, já paguei, resolvi, etc.)
+- "snoozed" — vai fazer depois (ainda não, depois, amanhã, vou fazer, etc.)
+- "cancelled" — não quer mais fazer (cancela, esquece, não precisa, etc.)
+- "new_message" — não é resposta ao follow-up, é uma mensagem nova sobre outro assunto
+
+Responda APENAS com a palavra: done, snoozed, cancelled, ou new_message.`
+          },
+          { role: 'user', content: text }
+        ],
+        max_tokens: 10,
+        temperature: 0
+      })
+    });
+
+    if (!res.ok) return 'new_message';
+    const data = await res.json();
+    const result = (data.choices?.[0]?.message?.content || '').trim().toLowerCase();
+    if (['done', 'snoozed', 'cancelled', 'new_message'].includes(result)) return result;
+    return 'new_message';
+  } catch (err) {
+    console.error('classifyFollowupResponse GPT failed:', err);
+    return 'new_message'; // fallback seguro: trata como mensagem nova
+  }
+}
+
+// ============================================
+// 4.3 — HANDLE FOLLOW-UP RESPONSE
+// Atualiza task_status e responde ao usuário na persona
+// ============================================
+async function handleFollowupResponse(user, phoneNumber, action, originalText) {
+  const messageId = user.pending_followup_id;
+  const persona = user.persona || 'ceo';
+  const memoName = user.memo_name || 'Memo';
+
+  // 1. Atualizar task_status na mensagem original
+  const statusMap = { done: 'done', snoozed: 'snoozed', cancelled: 'cancelled' };
+  const newStatus = statusMap[action] || 'pending';
+
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/messages?id=eq.${encodeURIComponent(messageId)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          Prefer: 'return=minimal'
+        },
+        body: JSON.stringify({ task_status: newStatus })
+      }
+    );
+    if (!res.ok) {
+      console.error('Failed to update task_status:', res.status, await res.text());
+    }
+  } catch (err) {
+    console.error('task_status update error:', err);
+  }
+
+  // 2. Limpar follow-up pendente do user
+  await updateUser(phoneNumber, { pending_followup_id: null });
+
+  // 3. Gerar confirmação na persona
+  const confirmations = {
+    ceo: {
+      done: 'Fechado. Menos uma pendência.',
+      snoozed: 'Tá. Cobro de novo depois.',
+      cancelled: 'Removido. Segue o jogo.'
+    },
+    tiolegal: {
+      done: 'Boa, resolvido. Uma a menos na lista.',
+      snoozed: 'Beleza, cobro depois. Não vou esquecer.',
+      cancelled: 'Tirado da lista. Vida que segue.'
+    }
+  };
+
+  const personaConfirmations = confirmations[persona] || confirmations.ceo;
+  const reply = personaConfirmations[action] || 'Entendido.';
+
+  await sendWhatsAppReply(phoneNumber, reply);
+  console.log(`Follow-up resolved: ${action} for message ${messageId}`);
+}
+
+// ============================================
+// CATEGORIZAÇÃO (GPT-4o-mini JSON) — Phase 4 update: inclui due_at_iso
 // ============================================
 async function categorize(text) {
   // Data atual pra GPT calcular datas relativas ("amanhã", "sexta", etc.)
