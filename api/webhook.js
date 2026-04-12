@@ -2,7 +2,9 @@
 // Fluxo: recebe mensagem → (onboarding se user novo) → (áudio vira texto via Whisper)
 //         → categoriza com GPT-4o-mini → grava no Supabase → GERA REPLY COM PERSONA via GPT
 // Categorias (5): FINANCAS, COMPRAS, AGENDA, IDEIAS, LEMBRETES
-// Personas (4): alfred, mae, ceo, tiolegal
+// Personas ativas (2): ceo (Focado), tiolegal (Descontraído)
+// Alfred e Mãe: código preservado mas fora do onboarding (decisão 2026-04-12)
+// Alfred: nota 7.0 no teste formal. Mãe: nota 8.9, removida por decisão de produto (2 personas mais limpo)
 // Arquitetura v9: Claude Sonnet + MULTI-TURN few-shot
 // Teste: Claude segue persona/voz melhor que GPT em PT-BR?
 
@@ -686,10 +688,10 @@ function selectFewShot(persona, category) {
 
 // Rótulos legíveis das personas (pra mensagens de onboarding)
 const PERSONA_LABELS = {
-  alfred: 'Alfred',
-  mae: 'Mãe',
-  ceo: 'CEO',
-  tiolegal: 'Tio Legal'
+  alfred: 'Alfred',       // inativo no onboarding
+  mae: 'Mãe',             // inativo no onboarding
+  ceo: 'Focado',
+  tiolegal: 'Descontraído'
 };
 
 // ============================================
@@ -797,20 +799,20 @@ async function processMessage(body) {
     });
     await sendWhatsAppReply(
       phoneNumber,
-      `Perfeito, *${memoName}* na área. 🎩\n\n*2/3 — Como você quer que eu fale com você?*\n\n1️⃣ *Alfred* — formal, discreto, britânico. Te trata por "senhor/senhora".\n2️⃣ *Mãe* — carinhoso, afetuoso, te chama de "amor".\n3️⃣ *CEO* — executivo, conciso, sem rodeios.\n4️⃣ *Tio Legal* — leve, espirituoso, registra com um sorriso.\n\nResponde só com o número (1, 2, 3 ou 4).`
+      `Perfeito, *${memoName}* na área. 🎩\n\n*2/3 — Como você quer que eu fale com você?*\n\n1️⃣ *Focado* — direto, prático, sem rodeios.\n2️⃣ *Descontraído* — leve, espirituoso, registra com um sorriso.\n\nResponde só com o número (1 ou 2).`
     );
     return;
   }
 
   if (user.onboarding_state === 'awaiting_persona') {
     const choice = (originalText || '').trim();
-    const personaMap = { '1': 'alfred', '2': 'mae', '3': 'ceo', '4': 'tiolegal' };
+    const personaMap = { '1': 'ceo', '2': 'tiolegal' };
     const persona = personaMap[choice];
 
     if (!persona) {
       await sendWhatsAppReply(
         phoneNumber,
-        `Hmm, não entendi. Manda só o número: *1* (Alfred), *2* (Mãe), *3* (CEO) ou *4* (Tio Legal).`
+        `Hmm, não entendi. Manda só o número: *1* (Focado) ou *2* (Descontraído).`
       );
       return;
     }
@@ -824,7 +826,7 @@ async function processMessage(body) {
     const userNameQuestions = {
       alfred: `*3/3 — Última coisa, senhor: como prefere que eu o chame?*\n(Ex: Victor, Sr. Victor, senhor)`,
       mae: `*3/3 — Última coisa, amor: como quer que eu te chame?*\n(Ex: Victor, amor, meu bem)`,
-      ceo: `*3/3 — Como prefere ser chamado?*\n(Ex: Victor, Sr. Victor)`,
+      ceo: `*3/3 — Como prefere ser chamado?*\n(Ex: Victor, chefe)`,
       tiolegal: `*3/3 — E aí, como te chamo?*\n(Ex: Victor, chefe, parceiro)`
     };
     await sendWhatsAppReply(phoneNumber, userNameQuestions[persona]);
