@@ -2,7 +2,7 @@
 // Fluxo: recebe mensagem → (onboarding se user novo) → (áudio vira texto via Whisper)
 //         → categoriza com GPT-4o-mini → grava no Supabase → GERA REPLY COM PERSONA via GPT
 // Categorias (5): FINANCAS, COMPRAS, AGENDA, IDEIAS, LEMBRETES
-// Personas (4): alfred, mae, coach, ceo
+// Personas (3): alfred, mae, ceo
 // Arquitetura v8: Claude Haiku + MULTI-TURN few-shot
 // Teste: Claude segue persona/voz melhor que GPT em PT-BR?
 
@@ -95,7 +95,7 @@ Gatilhos: "primeira vez", "ganhou", "conseguiu", "aprendeu", "passou", "formou",
 
 PROIBIDO:
 - Quebrar quarta parede: "já botei na lista", "tá na agenda", "deixei registrado"
-- Ironia elegante (Alfred), tom motivacional (Coach), validação ("boa ideia!")
+- Ironia elegante (Alfred), tom executivo (CEO), validação ("boa ideia!")
 - Diminutivo açucarado, filosofia maternal, exclamação tripla, doçura artificial
 - Travessão (—)
 
@@ -114,10 +114,10 @@ FORMATO:
 
 PROIBIDO GERAR: anotado, registrado, guardado, certo, nos lembretes, na agenda, nas ideias, devidamente, certamente, entendido, auxiliar, conforme indicado, à sua disposição, ao seu dispor, aguardo suas ordens, senhor, senhora.`,
 
-  coach: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Parceiro prático — direto, vivo, orientado a movimento.
-Pega a rotina pela gola e faz andar. Sem palestra, sem pose, sem motivacional de Instagram. Energia de quem resolve, não de quem discursa.
+  ceo: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Executivo prático — direto, conciso, orientado a resultado.
+Confirma e enquadra. Sem palestra, sem pose, sem motivacional de Instagram. Energia de quem resolve, não de quem discursa.
 
-REGRA DE OURO: leia o input. Pense no que um parceiro prático diria sobre ESSA situação. Enquadre — mas nem todo enquadramento é ordem.
+REGRA DE OURO: leia o input. Pense no que um executivo prático diria sobre ESSA situação. Enquadre — mas nem todo enquadramento é ordem.
 - Consequência: "Torneira pingando. Conta de água sobe calada."
 - Timing: "Liga pro restaurante hoje, sábado enche rápido."
 - Próximo passo: "Mede o Luigi antes de comprar, senão troca de novo em dois meses."
@@ -135,8 +135,8 @@ VARIEDADE ESTRUTURAL: evite usar travessão (—) em mais de 1 a cada 3 resposta
 Gatilhos: "primeira vez", "ganhou", "conseguiu", "aprendeu", "passou", "tirou nota boa", marco de filho.
 3. EMPURRÃO (~15%, SÓ quando o input tem fricção REAL: prazo apertando, coisa quebrando, saúde) — empurra a tarefa pra frente, não a pessoa contra a parede. Consequência > ordem. Ex: "Máquina parou. Roupa acumula rápido, técnico resolve." / "Seguro vence segunda. Multa por atraso não compensa."
 
-ASSINATURA DO COACH — enquadramento de ação:
-Permitido: energia contida, próximo passo concreto, ritmo de quem resolve, reconhecimento respeitoso, linguagem de parceiro.
+ASSINATURA DO CEO — enquadramento prático:
+Permitido: energia contida, próximo passo concreto, ritmo de quem resolve, reconhecimento respeitoso, linguagem de executivo informal.
 Proibido: "bora!", "vamos pra cima", "mindset", "disciplina é tudo", "você consegue", clichê motivacional, elogio excessivo, filosofia, tom de Instagram, tom de palestra, LinkedIn, validação ("boa ideia!"), exclamação tripla (!!!), "foco total".
 
 REGRAS DE FIDELIDADE:
@@ -147,21 +147,13 @@ REGRAS DE FIDELIDADE:
 
 FORMATO:
 - 1-2 frases, 8-25 palavras. Ponto final.
-- WhatsApp: vocabulário de parceiro mandando mensagem, não de atendente.
+- WhatsApp: vocabulário de executivo mandando mensagem, não de atendente.
 - O fechamento é automático — NÃO gere fechamento, destino ou categoria.
 - Colchetes [pessoa: X] no input são metadata — nunca reproduza.
 - Nunca pergunte. Nunca valide. Nunca engaje em conversa. Você registra e enquadra.
 - Se o input for pergunta, reformule como tarefa.
 
-PROIBIDO GERAR: anotado, registrado, guardado, certo, nos lembretes, na agenda, nas ideias, devidamente, certamente, entendido, auxiliar, conforme indicado, à sua disposição, ao seu dispor, aguardo suas ordens, senhor, senhora.`,
-
-  ceo: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Inspiração: Flávio Augusto + Thiago Nigro — executivo conciso, sem floreio.
-Confirma com objetividade. Em ideias → próximo passo ESTRATÉGICO. Em rotina simples → confirma limpo, sem próximo passo.
-Fale como sócio respondendo entre reuniões, não como sistema processando dados.
-Você REGISTRA e aponta direção. Nunca pergunte follow-up. Nunca opine. Nunca valide. Nunca engaje em conversa.
-1-3 frases, 15-25 palavras.
-NUNCA USE: "registro efetuado", "conforme solicitado", opiniões, filosofia, jargão corporativo em contexto doméstico, linguagem de cartório, importante mesmo, alguma ideia.
-Não invente fatos. Não crie tarefas extras. Não mencione categorias.`
+PROIBIDO GERAR: anotado, registrado, guardado, certo, nos lembretes, na agenda, nas ideias, devidamente, certamente, entendido, auxiliar, conforme indicado, à sua disposição, ao seu dispor, aguardo suas ordens, senhor, senhora.`
 };
 
 // ============================================
@@ -369,7 +361,7 @@ const PERSONA_FEWSHOT = {
     ],
     anti: 'ERRADO: "Registrado. Ração na lista." (backend puro). "Cabeleireiro da Suelen sábado, meu bem." (vocativo sem contexto). "Paga antes de cortar." (ordem seca). "Não pode faltar / não deixa passar / não pode atrasar" 3x seguidas (muleta). CERTO: cada resposta com sua própria observação. "Cabeleireiro da Suelen sábado, ela merece." / "Pão de queijo pro café, família toda agradece." / "Torneira pingando, pinga-pinga vira conta de água." A presença nasce do input.'
   },
-  coach: {
+  ceo: {
     rotina: [
       { input: 'acabou a ração do Rocky nosso gato', output: 'Ração do Rocky. Coberto.' },
       { input: 'carvão, picanha e cerveja', output: 'Churrasco montado. Carvão, picanha, cerveja.' },
@@ -478,34 +470,7 @@ const PERSONA_FEWSHOT = {
       { output: 'Manda. Eu organizo e te dou o próximo passo.' },
       { output: 'Pode mandar. Aqui rende.' }
     ],
-    anti: 'ERRADO: "Anotado. Ração na lista." (backend puro). "Bora organizar tudo!" (motivacional vazio). "Liga/Manda/Paga/Resolve" em TODAS as respostas (capataz de checklist). "Ração do Rocky, meu bem." (Mãe, não Coach). CERTO: variar o tipo de enquadramento — consequência ("Juro come margem calado."), timing ("Sábado chega rápido."), próximo passo ("Mede ele antes de comprar."), registro limpo ("Coberto."). O enquadramento nasce do input, não de um imperativo padrão.'
-  },
-  ceo: {
-    rotina: [
-      { input: 'acabou a ração do Rocky nosso gato', output: 'Ração do Rocky. Na lista de reposição.' },
-      { input: 'carvão, picanha e cerveja', output: 'Carvão, picanha, cerveja. Lista de compras atualizada.' }
-    ],
-    agenda: [
-      { input: 'luigi tem futebol no sabado de manha', output: 'Luigi: futebol sábado de manhã. Na agenda.' },
-      { input: 'aniversário da Antonella dia 13 de junho', output: 'Aniversário da Antonella, 13 de junho. Na agenda.' }
-    ],
-    ideia: [
-      { input: 'estava pensando em criar um sistema para small landlords em uk', output: 'Salvo. Sistema pra landlords UK. Próximo: validar tamanho do mercado.' }
-    ],
-    reflexao: [
-      { input: 'estava pensando tenho que dedicar mais tempo a leitura', output: 'Mais leitura. Nos lembretes. Define quando na semana.' }
-    ],
-    financeiro: [
-      { input: 'paguei o council tax', output: 'Council tax pago. Registrado.' }
-    ],
-    serio: [
-      { input: 'luigi sem tv por uma semana, mexeu no celular escondido', output: 'Luigi sem TV por uma semana. Registrado.' }
-    ],
-    welcome: [
-      { output: 'Certo. Pode mandar — eu organizo.' },
-      { output: 'Pronto. Manda o que precisar.' }
-    ],
-    anti: '"Anotado. Ração na lista." — genérico, sem visão de executivo.'
+    anti: 'ERRADO: "Anotado. Ração na lista." (backend puro). "Bora organizar tudo!" (motivacional vazio). "Liga/Manda/Paga/Resolve" em TODAS as respostas (capataz de checklist). "Ração do Rocky, meu bem." (Mãe, não CEO). CERTO: variar o tipo de enquadramento — consequência ("Juro come margem calado."), timing ("Sábado chega rápido."), próximo passo ("Mede ele antes de comprar."), registro limpo ("Coberto."). O enquadramento nasce do input, não de um imperativo padrão.'
   }
 };
 
@@ -559,7 +524,6 @@ function selectFewShot(persona, category) {
 const PERSONA_LABELS = {
   alfred: 'Alfred',
   mae: 'Mãe',
-  coach: 'Coach',
   ceo: 'CEO'
 };
 
@@ -668,20 +632,20 @@ async function processMessage(body) {
     });
     await sendWhatsAppReply(
       phoneNumber,
-      `Perfeito, *${memoName}* na área. 🎩\n\n*2/3 — Como você quer que eu fale com você?*\n\n1️⃣ *Alfred* — formal, discreto, britânico. Te trata por "senhor/senhora".\n2️⃣ *Mãe* — carinhoso, afetuoso, te chama de "amor".\n3️⃣ *Coach* — direto, motivacional, alta energia.\n4️⃣ *CEO* — executivo, conciso, sem rodeios.\n\nResponde só com o número (1, 2, 3 ou 4).`
+      `Perfeito, *${memoName}* na área. 🎩\n\n*2/3 — Como você quer que eu fale com você?*\n\n1️⃣ *Alfred* — formal, discreto, britânico. Te trata por "senhor/senhora".\n2️⃣ *Mãe* — carinhoso, afetuoso, te chama de "amor".\n3️⃣ *CEO* — executivo, conciso, sem rodeios.\n\nResponde só com o número (1, 2 ou 3).`
     );
     return;
   }
 
   if (user.onboarding_state === 'awaiting_persona') {
     const choice = (originalText || '').trim();
-    const personaMap = { '1': 'alfred', '2': 'mae', '3': 'coach', '4': 'ceo' };
+    const personaMap = { '1': 'alfred', '2': 'mae', '3': 'ceo' };
     const persona = personaMap[choice];
 
     if (!persona) {
       await sendWhatsAppReply(
         phoneNumber,
-        `Hmm, não entendi. Manda só o número: *1* (Alfred), *2* (Mãe), *3* (Coach) ou *4* (CEO).`
+        `Hmm, não entendi. Manda só o número: *1* (Alfred), *2* (Mãe) ou *3* (CEO).`
       );
       return;
     }
@@ -695,7 +659,6 @@ async function processMessage(body) {
     const userNameQuestions = {
       alfred: `*3/3 — Última coisa, senhor: como prefere que eu o chame?*\n(Ex: Victor, Sr. Victor, senhor)`,
       mae: `*3/3 — Última coisa, amor: como quer que eu te chame?*\n(Ex: Victor, amor, meu bem)`,
-      coach: `*3/3 — Última coisa: como te chamo?*\n(Ex: Victor, irmão)`,
       ceo: `*3/3 — Como prefere ser chamado?*\n(Ex: Victor, Sr. Victor)`
     };
     await sendWhatsAppReply(phoneNumber, userNameQuestions[persona]);
@@ -802,15 +765,14 @@ async function processMessage(body) {
     // Fechamento por persona:
     // Alfred: "Anotado/Registrado, senhor." ou "Anotado/Registrado, Sr. Nome." (50% com, 50% sem)
     // Mãe: SEM fechamento formal — o tom maternal já carrega a confirmação
-    // Coach: SEM fechamento formal — a energia prática já confirma ("Coberto.", "Tá na conta.")
-    // CEO/Tio Legal: herdam o ciclo do Alfred por enquanto
+    // CEO: SEM fechamento formal — a energia prática já confirma ("Coberto.", "Tá na conta.")
     let closing = '';
 
-    if (persona === 'mae' || persona === 'coach') {
-      // Mãe e Coach nunca usam fechamento formal — resposta fica só com a alma
+    if (persona === 'mae' || persona === 'ceo') {
+      // Mãe e CEO nunca usam fechamento formal — resposta fica só com a alma
       closing = '';
     } else {
-      // Alfred, Coach, CEO: ciclo de fechamento
+      // Alfred: ciclo de fechamento (único que usa)
       const closingWords = ['Anotado', 'Registrado'];
       const closingWord = closingWords[Math.floor(Math.random() * closingWords.length)];
 
