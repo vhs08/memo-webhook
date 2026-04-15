@@ -6,7 +6,7 @@
 // Personas ativas (2): ceo (Focado), tiolegal (Descontraído) — com regra anti-alucinação
 // Phase 4: due_at (ISO date) e task_status (pending/done) salvos pra cron proativo
 // Cron separado em api/cron.js — roda diário, manda reminders e follow-ups
-// Arquitetura v12: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron + dedup + timezone dinâmico + reaction imediata
+// Arquitetura v13: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron + dedup + timezone dinâmico + reaction condicional (só fluxo normal, skip onboarding/follow-up)
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -760,9 +760,20 @@ async function processMessage(body) {
     }
   }
 
-  // --- Fix #8: Reaction imediata (feedback em <1s enquanto o pipeline roda) ---
-  // Não aguarda (fire-and-forget) pra não bloquear o fluxo principal
-  if (waMessageId) {
+  // --- Carrega user cedo pra decidir se a reaction faz sentido ---
+  // (Reaction só pra fluxos com latência real: não onboarding, não follow-up response)
+  const earlyUser = await fetchUser(phoneNumber);
+
+  // --- Fix #8: Reaction imediata (feedback em <1s antes do Whisper/GPT/Claude) ---
+  // Skip nos fluxos rápidos: onboarding (<2s) e follow-up response (~1-2s)
+  // Só dispara pra users em estado 'done' sem follow-up pendente (fluxo normal com latência real)
+  const shouldReact = (
+    waMessageId &&
+    earlyUser &&
+    earlyUser.onboarding_state === 'done' &&
+    !earlyUser.pending_followup_id
+  );
+  if (shouldReact) {
     sendWhatsAppReaction(phoneNumber, waMessageId, '👀').catch(() => {});
   }
 
@@ -795,8 +806,8 @@ async function processMessage(body) {
     return;
   }
 
-  // --- Carrega (ou cria) o user do Supabase ---
-  let user = await fetchUser(phoneNumber);
+  // --- Reusa o user carregado antes da reaction (evita 2x fetchUser) ---
+  let user = earlyUser;
 
   if (!user) {
     // Primeira mensagem — cria row já em 'awaiting_name' e manda pergunta 1
