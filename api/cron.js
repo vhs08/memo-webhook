@@ -1,8 +1,8 @@
-// Memo Assistant — Proactive Engine (Phase 4.5 — Recorrência)
-// Roda via Vercel Cron — gera lembretes, follow-ups, shopping lists, recurring events
+// Memo Assistant — Proactive Engine (Phase 4.6 — Post-event Follow-up)
+// Roda via Vercel Cron — gera lembretes, follow-ups, shopping lists, recurring events, post-event
 // Arquitetura: composição estruturada + persona via Claude
-// Sub-fases ativas: 4.2 pre-event reminders, 4.3 follow-up de pendências, 4.4 shopping list semanal, 4.5 recorrência
-// Sub-fases placeholder: 4.6 post-event, 4.7 daily briefing
+// Sub-fases ativas: 4.2 reminders, 4.3 follow-up, 4.4 shopping, 4.5 recorrência, 4.6 post-event
+// Sub-fases placeholder: 4.7 daily briefing
 // Cron schedules (vercel.json):
 //   - 0 7 * * * (daily 7h UTC)  → reminders + follow-ups + shopping saturday reminder + recurring matches
 //   - 0 17 * * 5 (friday 17h UTC = 18h BST) → shopping list send
@@ -71,7 +71,12 @@ Use "pra/pro", tom WhatsApp informal de executivo.`,
       { type: 'reminder_recurring', entity: 'ir à academia sexta às 07:00', output: 'Academia sexta às 7h. Deixa a mochila pronta na quinta.' },
       { type: 'reminder_recurring', entity: 'pagar council tax hoje', output: 'Council tax hoje. Resolve de manhã.' },
       { type: 'reminder_recurring', entity: 'mercado hoje às 09:00', output: 'Mercado hoje às 9h. Leva a lista.' },
-      { type: 'reminder_recurring', entity: 'futebol do Luigi amanhã às 09:00', output: 'Futebol do Luigi amanhã 9h. Chuteira pronta hoje.' }
+      { type: 'reminder_recurring', entity: 'futebol do Luigi amanhã às 09:00', output: 'Futebol do Luigi amanhã 9h. Chuteira pronta hoje.' },
+      { type: 'post_event', entity: 'Dentista do Luigi', output: 'E aí, como foi a dentista do Luigi?' },
+      { type: 'post_event', entity: 'Reunião de pais', output: 'Reunião de pais — foi tudo certo?' },
+      { type: 'post_event', entity: 'Consulta no GP', output: 'Consulta no GP, resolveu o que precisava?' },
+      { type: 'post_event_nudge', entity: 'Dentista do Luigi', output: 'Dentista do Luigi ainda em aberto aqui — foi tudo certo?' },
+      { type: 'post_event_nudge', entity: 'Reunião de pais', output: 'Reunião de pais — fecha pra mim, foi tudo ok?' }
     ]
   },
   tiolegal: {
@@ -102,7 +107,12 @@ Use "pra/pro", tom WhatsApp informal de tio.`,
       { type: 'reminder_recurring', entity: 'ir à academia sexta às 07:00', output: 'Academia sexta 7h. Mochila arrumada na quinta à noite é vitória.' },
       { type: 'reminder_recurring', entity: 'pagar council tax hoje', output: 'Council tax hoje. Resolve cedo, que à tarde aparece imprevisto.' },
       { type: 'reminder_recurring', entity: 'mercado hoje às 09:00', output: 'Mercado hoje 9h. Lista na mão e bora.' },
-      { type: 'reminder_recurring', entity: 'futebol do Luigi amanhã às 09:00', output: 'Futebol do Luigi amanhã 9h. Chuteira limpa vira ritual da noite.' }
+      { type: 'reminder_recurring', entity: 'futebol do Luigi amanhã às 09:00', output: 'Futebol do Luigi amanhã 9h. Chuteira limpa vira ritual da noite.' },
+      { type: 'post_event', entity: 'Dentista do Luigi', output: 'E aí, como foi a dentista do Luigi?' },
+      { type: 'post_event', entity: 'Reunião de pais', output: 'Reunião de pais — tudo tranquilo?' },
+      { type: 'post_event', entity: 'Consulta no GP', output: 'E a consulta no GP, saiu o que precisava?' },
+      { type: 'post_event_nudge', entity: 'Dentista do Luigi', output: 'Só pra fechar a lista — dentista do Luigi ficou ok?' },
+      { type: 'post_event_nudge', entity: 'Reunião de pais', output: 'Reunião de pais ainda em aberto aqui — foi tudo certo?' }
     ]
   }
 };
@@ -230,6 +240,33 @@ async function processUser(user, now, ukNow) {
         }
       }
     }
+  }
+
+  // ---- 4.6 — POST-EVENT FOLLOW-UP ----
+  // AGENDA one-time que já passou → pergunta "como foi?" na manhã seguinte
+  // Até 2 tentativas (gap 48h). Depois auto-fecha silenciosamente.
+  if (user.followup_enabled !== false && remaining > 0 && !user.pending_followup_id) {
+    const eligible = await getPastEventsForPostEvent(phone, ukNow);
+    console.log(`[Cron] ${phone}: ${eligible.length} past events eligible for post-event`);
+
+    if (eligible.length > 0) {
+      const { event, nudge } = eligible[0]; // mais antigo primeiro
+      const entity = buildPostEventEntity(event);
+      const type = nudge === 1 ? 'post_event' : 'post_event_nudge';
+
+      const message = await generateProactiveMessage(user, { type, entity });
+      if (message) {
+        await sendWhatsAppMessage(phone, message);
+        await logProactive(phone, 'post_event', event.id, message);
+        await updateUserField(phone, 'pending_followup_id', event.id);
+        remaining--;
+        sent++;
+        console.log(`[Cron] ${phone}: sent post-event (nudge ${nudge}) — "${message}"`);
+      }
+    }
+
+    // Give-up: eventos com 2+ nudges e sem resposta → auto-done silencioso
+    await cleanupStaleEvents(phone, ukNow);
   }
 
   // ---- 4.5 — RECORRÊNCIA (recurring events reminders) ----
@@ -711,6 +748,143 @@ function computeDayLabel(nextDate, ukNow) {
   if (diffDays === 1) return 'amanhã';
   const weekdays = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
   return weekdays[nextDate.getDay()];
+}
+
+// ============================================
+// 4.6 — POST-EVENT FOLLOW-UP HELPERS
+// ============================================
+
+// Query: AGENDA one-time (sem recurrence_rule) com due_at passado (últimos 7 dias)
+// e task_status ainda pending
+async function getPastAgendaEvents(phoneNumber, ukNow) {
+  const sevenDaysAgo = new Date(ukNow.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/messages?phone_number=eq.${encodeURIComponent(phoneNumber)}&category=eq.AGENDA&task_status=eq.pending&due_at=lt.${ukNow.toISOString()}&due_at=gte.${sevenDaysAgo.toISOString()}&select=id,original_text,category,metadata,due_at&order=due_at.asc`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
+
+  if (!res.ok) {
+    console.error('[Cron] getPastAgendaEvents failed:', res.status, await res.text());
+    return [];
+  }
+
+  const rows = await res.json();
+  // Filtra os que têm recurrence_rule (recorrentes são tratados pelo 4.5)
+  return rows.filter(r => !r?.metadata?.recurrence_rule);
+}
+
+// Query: conta quantos post_event logs existem pra um evento
+async function countPostEventAttempts(phoneNumber, eventId) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/proactive_log?phone_number=eq.${encodeURIComponent(phoneNumber)}&message_type=eq.post_event&reference_message_id=eq.${encodeURIComponent(eventId)}&select=sent_at&order=sent_at.desc`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
+  if (!res.ok) return { count: 0, lastSent: null };
+  const rows = await res.json();
+  return {
+    count: rows.length,
+    lastSent: rows?.[0]?.sent_at || null
+  };
+}
+
+// Retorna eventos elegíveis pra post-event follow-up
+// Cada entry: { event, nudge: 1 | 2 }
+async function getPastEventsForPostEvent(phoneNumber, ukNow) {
+  const pastEvents = await getPastAgendaEvents(phoneNumber, ukNow);
+  const eligible = [];
+
+  for (const event of pastEvents) {
+    const { count, lastSent } = await countPostEventAttempts(phoneNumber, event.id);
+
+    if (count === 0) {
+      // Nunca foi cobrado ainda → 1ª tentativa
+      eligible.push({ event, nudge: 1 });
+    } else if (count === 1) {
+      // Já cobrou 1x. Só tenta de novo se já passou 48h
+      const hoursSince = lastSent ? (ukNow - new Date(lastSent)) / (1000 * 60 * 60) : 999;
+      if (hoursSince >= 48) {
+        eligible.push({ event, nudge: 2 });
+      }
+    }
+    // count >= 2: desiste (tratado em cleanupStaleEvents)
+  }
+
+  return eligible;
+}
+
+// Limpa eventos que tiveram 2+ nudges e ainda sem resposta (> 48h desde o último)
+// Auto-marca task_status=done e limpa pending_followup_id se apontar pra eles
+async function cleanupStaleEvents(phoneNumber, ukNow) {
+  const pastEvents = await getPastAgendaEvents(phoneNumber, ukNow);
+
+  for (const event of pastEvents) {
+    const { count, lastSent } = await countPostEventAttempts(phoneNumber, event.id);
+    if (count < 2) continue;
+
+    const hoursSince = lastSent ? (ukNow - new Date(lastSent)) / (1000 * 60 * 60) : 0;
+    if (hoursSince < 48) continue; // Ainda dentro da janela do 2º nudge
+
+    // Give up: marca done silenciosamente
+    console.log(`[Cron] ${phoneNumber}: giving up on event ${event.id} (2 nudges, ${Math.round(hoursSince)}h since last)`);
+    try {
+      await fetch(
+        `${SUPABASE_URL}/rest/v1/messages?id=eq.${encodeURIComponent(event.id)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            Prefer: 'return=minimal'
+          },
+          body: JSON.stringify({ task_status: 'done' })
+        }
+      );
+    } catch (err) {
+      console.error('[Cron] cleanupStaleEvents patch failed:', err);
+    }
+  }
+
+  // Se o user tem pending_followup_id apontando pra um desses eventos stale, limpa
+  const userRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/users?phone_number=eq.${encodeURIComponent(phoneNumber)}&select=pending_followup_id`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
+  if (!userRes.ok) return;
+  const users = await userRes.json();
+  const pendingId = users?.[0]?.pending_followup_id;
+  if (!pendingId) return;
+
+  // Se o pending_followup_id aponta pra um dos stale events que acabamos de marcar como done
+  const stillStale = pastEvents.find(e => e.id === pendingId);
+  if (stillStale) {
+    const { count } = await countPostEventAttempts(phoneNumber, pendingId);
+    if (count >= 2) {
+      await updateUserField(phoneNumber, 'pending_followup_id', null);
+      console.log(`[Cron] ${phoneNumber}: cleared stale pending_followup_id ${pendingId}`);
+    }
+  }
+}
+
+// Monta entity pra prompt de post-event
+function buildPostEventEntity(event) {
+  return event?.metadata?.action_summary || event?.metadata?.clean_text || event?.original_text || 'Seu compromisso';
 }
 
 // Monta entity pra prompt de reminder de recorrente (com label de dia correto)
