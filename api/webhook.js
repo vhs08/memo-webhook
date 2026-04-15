@@ -1437,7 +1437,7 @@ DATAS RELATIVAS — USE ESTA TABELA (já calculada pra hoje=${today}):
 - "semana que vem" / "próxima semana" → ${dateNextWeek}T09:00:00${ukOffset}
 - Dia da semana sem qualificador ("sexta", "terça") → PRÓXIMA ocorrência desse dia a partir de hoje
 - "sexta passada" / "terça passada" → ocorrência PASSADA mais recente desse dia
-- "dia 20" / "dia X" → próximo dia 20 (se já passou este mês, próximo mês)
+- "dia 20" / "dia X" (sem mês especificado) → SEMPRE tente o MÊS ATUAL primeiro. Só vá pro próximo mês se o dia X já passou este mês. Exemplo com hoje=${today}: "dia 25" deve ser ${today.slice(0, 7)}-25 se 25 >= ${today.slice(8, 10)}, senão próximo mês.
 
 IMPORTANTE: Sempre use o offset ${ukOffset} no final do ISO (não use "+01:00" ou "+00:00" hardcoded). Se a mensagem diz "ontem" ou "semana passada", o due_at_iso DEVE ser preenchido (não pode vir null).
 
