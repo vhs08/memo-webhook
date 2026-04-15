@@ -6,7 +6,7 @@
 // Personas ativas (2): ceo (Focado), tiolegal (Descontraído) — com regra anti-alucinação
 // Phase 4: due_at (ISO date) e task_status (pending/done) salvos pra cron proativo
 // Cron separado em api/cron.js — roda diário, manda reminders e follow-ups
-// Arquitetura v15: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron + dedup + timezone dinâmico + reaction condicional + shopping list 4.4 + recorrência 4.5 (recurrence_rule + advance de LEMBRETES recorrentes)
+// Arquitetura v16: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron + dedup + timezone dinâmico + reaction condicional + shopping list 4.4 + recorrência 4.5 + post-event 4.6 (confirmações diferenciadas AGENDA vs LEMBRETES)
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -1362,22 +1362,40 @@ async function handleFollowupResponse(user, phoneNumber, action, originalText) {
   // 3. Limpar follow-up pendente do user
   await updateUser(phoneNumber, { pending_followup_id: null });
 
-  // 3. Gerar confirmação na persona
+  // 3. Gerar confirmação na persona (diferenciada por categoria)
+  // LEMBRETES (pendências): tom de "task fechada"
+  // AGENDA (eventos passados / post-event 4.6): tom de "compromisso vivido"
+  const isAgenda = targetMessage?.category === 'AGENDA';
   const confirmations = {
     ceo: {
-      done: 'Fechado. Menos uma pendência.',
-      snoozed: 'Tá. Cobro de novo depois.',
-      cancelled: 'Removido. Segue o jogo.'
+      lembretes: {
+        done: 'Fechado. Menos uma pendência.',
+        snoozed: 'Tá. Cobro de novo depois.',
+        cancelled: 'Removido. Segue o jogo.'
+      },
+      agenda: {
+        done: 'Anotado. Fica aí.',
+        snoozed: 'Deixa comigo. Cobro de novo depois.',
+        cancelled: 'Removido do radar.'
+      }
     },
     tiolegal: {
-      done: 'Boa, resolvido. Uma a menos na lista.',
-      snoozed: 'Beleza, cobro depois. Não vou esquecer.',
-      cancelled: 'Tirado da lista. Vida que segue.'
+      lembretes: {
+        done: 'Boa, resolvido. Uma a menos na lista.',
+        snoozed: 'Beleza, cobro depois. Não vou esquecer.',
+        cancelled: 'Tirado da lista. Vida que segue.'
+      },
+      agenda: {
+        done: 'Boa. Valeu por fechar o ciclo.',
+        snoozed: 'Tranquilo, volto a perguntar.',
+        cancelled: 'Tirei do radar. Segue o baile.'
+      }
     }
   };
 
-  const personaConfirmations = confirmations[persona] || confirmations.ceo;
-  const reply = personaConfirmations[action] || 'Entendido.';
+  const personaTable = confirmations[persona] || confirmations.ceo;
+  const categoryTable = isAgenda ? personaTable.agenda : personaTable.lembretes;
+  const reply = categoryTable[action] || 'Entendido.';
 
   await sendWhatsAppReply(phoneNumber, reply);
   console.log(`Follow-up resolved: ${action} for message ${messageId}`);
