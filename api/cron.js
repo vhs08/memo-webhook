@@ -1,8 +1,8 @@
-// Memo Assistant — Proactive Engine (Phase 4.6 — Post-event Follow-up)
-// Roda via Vercel Cron — gera lembretes, follow-ups, shopping lists, recurring events, post-event
+// Memo Assistant — Proactive Engine (Phase 4 COMPLETA — 4.7 Daily Briefing)
+// Roda via Vercel Cron — gera lembretes, follow-ups, shopping lists, recurring, post-event, briefing
 // Arquitetura: composição estruturada + persona via Claude
-// Sub-fases ativas: 4.2 reminders, 4.3 follow-up, 4.4 shopping, 4.5 recorrência, 4.6 post-event
-// Sub-fases placeholder: 4.7 daily briefing
+// Sub-fases ativas: 4.2 reminders, 4.3 follow-up, 4.4 shopping, 4.5 recorrência, 4.6 post-event, 4.7 briefing
+// Briefing (opt-in via users.briefing_enabled) substitui 4.2/4.3/4.5 — 1 mensagem consolidada na manhã
 // Cron schedules (vercel.json):
 //   - 0 7 * * * (daily 7h UTC)  → reminders + follow-ups + shopping saturday reminder + recurring matches
 //   - 0 17 * * 5 (friday 17h UTC = 18h BST) → shopping list send
@@ -76,7 +76,12 @@ Use "pra/pro", tom WhatsApp informal de executivo.`,
       { type: 'post_event', entity: 'Reunião de pais', output: 'Reunião de pais — foi tudo certo?' },
       { type: 'post_event', entity: 'Consulta no GP', output: 'Consulta no GP, resolveu o que precisava?' },
       { type: 'post_event_nudge', entity: 'Dentista do Luigi', output: 'Dentista do Luigi ainda em aberto aqui — foi tudo certo?' },
-      { type: 'post_event_nudge', entity: 'Reunião de pais', output: 'Reunião de pais — fecha pra mim, foi tudo ok?' }
+      { type: 'post_event_nudge', entity: 'Reunião de pais', output: 'Reunião de pais — fecha pra mim, foi tudo ok?' },
+      { type: 'briefing', entity: 'Eventos hoje: dentista Luigi 14h, academia 7h. Pendências atrasadas: TV licence (3 dias)', output: 'Bom dia. Hoje: dentista Luigi 14h, academia 7h. Atrasado: TV licence há 3 dias.' },
+      { type: 'briefing', entity: 'Eventos hoje: reunião de pais 18h. Nenhuma pendência atrasada', output: 'Bom dia. Reunião de pais hoje 18h.' },
+      { type: 'briefing', entity: 'Nenhum evento agendado. Nenhuma pendência atrasada', output: 'Bom dia. Agenda leve hoje.' },
+      { type: 'briefing', entity: 'Eventos hoje: futebol do Luigi 9h. Pendências atrasadas: council tax (2 dias), renovar carteira (5 dias)', output: 'Bom dia. Futebol do Luigi 9h. Atrasados: council tax 2 dias, carteira 5 dias.' },
+      { type: 'briefing', entity: 'Eventos hoje: academia 7h. Nenhuma pendência atrasada', output: 'Bom dia. Academia 7h. Nada mais na lista.' }
     ]
   },
   tiolegal: {
@@ -112,7 +117,12 @@ Use "pra/pro", tom WhatsApp informal de tio.`,
       { type: 'post_event', entity: 'Reunião de pais', output: 'Reunião de pais — tudo tranquilo?' },
       { type: 'post_event', entity: 'Consulta no GP', output: 'E a consulta no GP, saiu o que precisava?' },
       { type: 'post_event_nudge', entity: 'Dentista do Luigi', output: 'Só pra fechar a lista — dentista do Luigi ficou ok?' },
-      { type: 'post_event_nudge', entity: 'Reunião de pais', output: 'Reunião de pais ainda em aberto aqui — foi tudo certo?' }
+      { type: 'post_event_nudge', entity: 'Reunião de pais', output: 'Reunião de pais ainda em aberto aqui — foi tudo certo?' },
+      { type: 'briefing', entity: 'Eventos hoje: dentista Luigi 14h, academia 7h. Pendências atrasadas: TV licence (3 dias)', output: 'Bom dia. Agenda do dia: dentista do Luigi 14h e academia 7h. Ainda de molho: TV licence, 3 dias de atraso.' },
+      { type: 'briefing', entity: 'Eventos hoje: reunião de pais 18h. Nenhuma pendência atrasada', output: 'Bom dia. Reunião de pais hoje 18h. Lista vazia no resto.' },
+      { type: 'briefing', entity: 'Nenhum evento agendado. Nenhuma pendência atrasada', output: 'Bom dia. Dia de respirar — agenda leve.' },
+      { type: 'briefing', entity: 'Eventos hoje: futebol do Luigi 9h. Pendências atrasadas: council tax (2 dias), renovar carteira (5 dias)', output: 'Bom dia. Futebol do Luigi 9h. Atrasados na lista: council tax (2 dias), carteira (5).' },
+      { type: 'briefing', entity: 'Eventos hoje: academia 7h. Nenhuma pendência atrasada', output: 'Bom dia. Academia 7h. Lista limpa no resto.' }
     ]
   }
 };
@@ -172,8 +182,19 @@ async function processUser(user, now, ukNow) {
     return 0;
   }
 
+  // ---- 4.7 — DAILY BRIEFING (opt-in, replaces 4.2/4.3/4.5 when enabled) ----
+  let briefingSent = false;
+  if (user.briefing_enabled === true && remaining > 0) {
+    briefingSent = await processDailyBriefing(user, ukNow);
+    if (briefingSent) {
+      remaining--;
+      sent++;
+    }
+  }
+
   // ---- 4.2 — PRE-EVENT REMINDERS ----
-  if (user.reminders_enabled !== false && remaining > 0) {
+  // Skip se briefing já consolidou (evita duplicação de informação)
+  if (!briefingSent && user.reminders_enabled !== false && remaining > 0) {
     const reminders = await getUpcomingEvents(phone, now);
     console.log(`[Cron] ${phone}: ${reminders.length} upcoming events`);
 
@@ -211,7 +232,8 @@ async function processUser(user, now, ukNow) {
   }
 
   // ---- 4.3 — FOLLOW-UP DE PENDÊNCIAS ----
-  if (user.followup_enabled !== false && remaining > 0 && !user.pending_followup_id) {
+  // Skip se briefing já consolidou pendências atrasadas
+  if (!briefingSent && user.followup_enabled !== false && remaining > 0 && !user.pending_followup_id) {
     const overdue = await getOverdueTasks(phone, now);
     console.log(`[Cron] ${phone}: ${overdue.length} overdue tasks`);
 
@@ -270,8 +292,9 @@ async function processUser(user, now, ukNow) {
   }
 
   // ---- 4.5 — RECORRÊNCIA (recurring events reminders) ----
+  // Skip se briefing já incluiu os recorrentes de hoje
   // Todos os dias checa: hoje bate com algum recurrence_rule do user?
-  if (user.reminders_enabled !== false && remaining > 0) {
+  if (!briefingSent && user.reminders_enabled !== false && remaining > 0) {
     const recurringToday = await getRecurringItemsForToday(phone, ukNow);
     console.log(`[Cron] ${phone}: ${recurringToday.length} recurring items matching today`);
 
@@ -434,7 +457,8 @@ async function generateProactiveMessage(user, context) {
     shopping_list_date_reminder: 'Gere lembrete sobre lista da semana ainda em aberto, perguntando o dia da compra de novo:',
     reminder_recurring: 'Gere lembrete proativo para compromisso recorrente (o label de dia "hoje"/"amanhã"/"sexta" já está na entity, use-o):',
     reminder_today: 'Gere lembrete proativo para hoje:',
-    reminder_tomorrow: 'Gere lembrete proativo para amanhã:'
+    reminder_tomorrow: 'Gere lembrete proativo para amanhã:',
+    briefing: 'Gere o briefing matinal consolidado (começa com "Bom dia."). Use APENAS as informações da entity. NÃO invente eventos, pessoas, horários ou pendências que não estejam listados:'
   };
   const promptPrefix = PROMPT_PREFIXES[context.type] || 'Gere lembrete proativo para:';
 
@@ -758,6 +782,123 @@ function computeDayLabel(nextDate, ukNow) {
   if (diffDays === 1) return 'amanhã';
   const weekdays = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
   return weekdays[nextDate.getDay()];
+}
+
+// ============================================
+// 4.7 — DAILY BRIEFING HELPERS
+// ============================================
+
+// Janela manhã UK (6h-10h) — quando briefing pode disparar
+function isMorningWindow(ukNow) {
+  const h = ukNow.getHours();
+  return h >= 6 && h <= 10;
+}
+
+// Busca eventos hoje (AGENDA com due_at hoje, não-recorrente)
+async function getTodayEvents(phoneNumber, ukNow) {
+  const startToday = new Date(ukNow);
+  startToday.setHours(0, 0, 0, 0);
+  const startTomorrow = new Date(startToday);
+  startTomorrow.setDate(startTomorrow.getDate() + 1);
+
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/messages?phone_number=eq.${encodeURIComponent(phoneNumber)}&category=eq.AGENDA&task_status=eq.pending&due_at=gte.${startToday.toISOString()}&due_at=lt.${startTomorrow.toISOString()}&select=id,original_text,metadata,due_at&order=due_at.asc`,
+    { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+  );
+  if (!res.ok) return [];
+  const rows = await res.json();
+  return rows.filter(r => !r?.metadata?.recurrence_rule);
+}
+
+// Busca pendências atrasadas (LEMBRETES pending com due_at < hoje)
+async function getOverduePendencias(phoneNumber, ukNow, limit = 5) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/messages?phone_number=eq.${encodeURIComponent(phoneNumber)}&category=eq.LEMBRETES&task_status=eq.pending&due_at=lt.${ukNow.toISOString()}&due_at=not.is.null&select=id,original_text,metadata,due_at&order=due_at.asc&limit=${limit}`,
+    { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+  );
+  if (!res.ok) return [];
+  return await res.json();
+}
+
+// Formata item pra texto curto no briefing
+function formatBriefingItem(item, type) {
+  const summary = item?.metadata?.action_summary || item?.metadata?.clean_text || item?.original_text || '';
+  if (type === 'event') {
+    const time = item?.metadata?.time_text || '';
+    return time ? `${summary} ${time}` : summary;
+  }
+  if (type === 'overdue') {
+    const dueDate = item?.due_at ? new Date(item.due_at) : null;
+    const daysOverdue = dueDate ? Math.floor((new Date() - dueDate) / (1000 * 60 * 60 * 24)) : 0;
+    return daysOverdue > 0 ? `${summary} (${daysOverdue} dia${daysOverdue > 1 ? 's' : ''})` : summary;
+  }
+  if (type === 'recurring') {
+    const time = item?.metadata?.recurrence_rule?.time;
+    return time ? `${summary} ${time}` : summary;
+  }
+  return summary;
+}
+
+// Monta entity estruturado pro prompt de briefing
+function buildBriefingEntity(events, overdue, recurring) {
+  const parts = [];
+
+  const allEvents = [...events.map(e => ({ item: e, type: 'event' })), ...recurring.map(r => ({ item: r, type: 'recurring' }))];
+  if (allEvents.length > 0) {
+    const eventStrs = allEvents.map(({ item, type }) => formatBriefingItem(item, type));
+    parts.push(`Eventos hoje: ${eventStrs.join(', ')}`);
+  } else {
+    parts.push('Nenhum evento agendado');
+  }
+
+  if (overdue.length > 0) {
+    const overdueStrs = overdue.map(o => formatBriefingItem(o, 'overdue'));
+    parts.push(`Pendências atrasadas: ${overdueStrs.join(', ')}`);
+  } else {
+    parts.push('Nenhuma pendência atrasada');
+  }
+
+  return parts.join('. ');
+}
+
+// Processa o daily briefing
+// Retorna true se o briefing foi enviado (pra sinalizar que 4.2, 4.3, 4.5 devem ser skipped)
+async function processDailyBriefing(user, ukNow) {
+  const phone = user.phone_number;
+
+  // Só manda briefing na janela da manhã (6h-10h UK)
+  if (!isMorningWindow(ukNow)) return false;
+
+  // Dedup: briefing só 1x por dia. reference_message_id = YYYY-MM-DD
+  const todayKey = ukNow.toISOString().slice(0, 10);
+  const alreadySent = await wasProactiveSent(phone, 'briefing', todayKey);
+  if (alreadySent) {
+    console.log(`[Cron] ${phone}: briefing already sent today (${todayKey}), skipping`);
+    return false;
+  }
+
+  // Gather items
+  const events = await getTodayEvents(phone, ukNow);
+  const overdue = await getOverduePendencias(phone, ukNow);
+
+  // Recurring items matching today (reusa helper existente)
+  const recurring = await getRecurringItemsForToday(phone, ukNow);
+
+  // Monta entity estruturado
+  const entity = buildBriefingEntity(events, overdue, recurring);
+  console.log(`[Cron] ${phone}: briefing entity — "${entity}"`);
+
+  // Gera mensagem com persona via Claude
+  const message = await generateProactiveMessage(user, {
+    type: 'briefing',
+    entity: entity
+  });
+  if (!message) return false;
+
+  await sendWhatsAppMessage(phone, message);
+  await logProactive(phone, 'briefing', todayKey, message);
+  console.log(`[Cron] ${phone}: sent briefing — "${message}"`);
+  return true;
 }
 
 // ============================================
