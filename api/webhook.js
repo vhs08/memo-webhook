@@ -6,7 +6,7 @@
 // Personas ativas (2): ceo (Focado), tiolegal (Descontraído) — com regra anti-alucinação
 // Phase 4: due_at (ISO date) e task_status (pending/done) salvos pra cron proativo
 // Cron separado em api/cron.js — roda diário, manda reminders e follow-ups
-// Arquitetura v13: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron + dedup + timezone dinâmico + reaction condicional (só fluxo normal, skip onboarding/follow-up)
+// Arquitetura v14: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron + dedup + timezone dinâmico + reaction condicional + shopping list 4.4 (intercept resposta de data)
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -900,6 +900,13 @@ async function processMessage(body) {
   // --- Onboarding completo → fluxo normal de captura ---
   // user.onboarding_state === 'done'
 
+  // --- 4.4: Checar se é resposta à pergunta de data da shopping list ---
+  if (user.pending_shopping_list_date) {
+    console.log(`Intercepting as shopping list date response`);
+    await handleShoppingListDateResponse(user, phoneNumber, originalText);
+    return;
+  }
+
   // --- 4.3: Checar se é resposta a follow-up pendente ---
   if (user.pending_followup_id) {
     const followupAction = await classifyFollowupResponse(originalText);
@@ -1333,6 +1340,177 @@ async function handleFollowupResponse(user, phoneNumber, action, originalText) {
 
   await sendWhatsAppReply(phoneNumber, reply);
   console.log(`Follow-up resolved: ${action} for message ${messageId}`);
+}
+
+// ============================================
+// 4.4 — SHOPPING LIST DATE RESPONSE HANDLER
+// Usuário respondeu a pergunta "qual o dia da compra?"
+// Parseia data, cria task shopping_list, limpa flag, confirma na persona
+// ============================================
+async function handleShoppingListDateResponse(user, phoneNumber, originalText) {
+  const persona = user.persona || 'ceo';
+
+  // 1) Parsear a data usando GPT (reutiliza lógica de datas relativas)
+  const parsed = await parseShoppingDate(originalText);
+
+  if (!parsed || !parsed.due_at_iso) {
+    // Não conseguiu extrair data — pede de novo sem limpar a flag
+    const clarification = persona === 'tiolegal'
+      ? 'Não peguei o dia. Fala tipo "amanhã", "sábado", "dia 19".'
+      : 'Não entendi a data. Manda como "amanhã", "sábado", "dia 19".';
+    await sendWhatsAppReply(phoneNumber, clarification);
+    return;
+  }
+
+  // 2) Validar ISO
+  const d = new Date(parsed.due_at_iso);
+  if (isNaN(d.getTime())) {
+    await sendWhatsAppReply(phoneNumber, 'Não consegui entender a data. Tenta de novo?');
+    return;
+  }
+  const due_at = d.toISOString();
+
+  // 3) Buscar itens pendentes pra incluir na task consolidada
+  const items = await fetchPendingShoppingItemsForUser(phoneNumber);
+
+  // 4) Criar entry na messages como task consolidada da shopping list
+  const saveData = {
+    phone_number: phoneNumber,
+    message_type: 'text',
+    original_text: `Lista da semana (consolidada): ${items.join(', ')}`,
+    category: 'LEMBRETES',
+    status: 'processed',
+    due_at: due_at,
+    task_status: 'pending',
+    metadata: {
+      shopping_list: true,
+      items: items,
+      planned_for: parsed.due_at_iso,
+      planned_from_text: originalText.trim()
+    }
+  };
+
+  try {
+    await saveToSupabase(saveData);
+  } catch (err) {
+    console.error('Failed to save shopping list task:', err);
+    await sendWhatsAppReply(phoneNumber, 'Tive um problema pra salvar a lista. Tenta de novo?');
+    return;
+  }
+
+  // 5) Limpar flag do user
+  await updateUser(phoneNumber, { pending_shopping_list_date: null });
+
+  // 6) Confirmar na persona
+  const dateLabel = d.toLocaleDateString('pt-BR', { timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long' });
+  const reply = persona === 'tiolegal'
+    ? `Beleza, cobro ${dateLabel}. Deixo o alerta na fila.`
+    : `Tá. Cobro ${dateLabel}.`;
+
+  await sendWhatsAppReply(phoneNumber, reply);
+  console.log(`Shopping list date set: ${due_at} (${items.length} items)`);
+}
+
+// ============================================
+// Busca apenas os items shopping pendentes (pra consolidar na task)
+// Mesma lógica que o cron.getPendingShoppingItems, mas aqui no webhook
+// ============================================
+async function fetchPendingShoppingItemsForUser(phoneNumber) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/messages?phone_number=eq.${encodeURIComponent(phoneNumber)}&task_status=eq.pending&metadata->shopping_items=not.is.null&select=metadata&order=created_at.asc`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
+  if (!res.ok) {
+    console.error('fetchPendingShoppingItemsForUser failed:', res.status);
+    return [];
+  }
+  const rows = await res.json();
+  const seen = new Set();
+  const items = [];
+  for (const row of rows) {
+    const raw = row?.metadata?.shopping_items;
+    if (!Array.isArray(raw)) continue;
+    if (row?.metadata?.shopping_list === true) continue;
+    for (const item of raw) {
+      if (typeof item !== 'string') continue;
+      const key = item.trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      items.push(item.trim());
+    }
+  }
+  return items;
+}
+
+// ============================================
+// Parser de data leve (GPT-4o-mini com prompt compacto)
+// Usa mesma lógica de datas relativas do categorize, mas só pra extrair due_at
+// ============================================
+async function parseShoppingDate(text) {
+  const now = new Date();
+  const today = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+
+  const ukOffset = (() => {
+    const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', timeZoneName: 'longOffset' });
+    const parts = fmt.formatToParts(now);
+    const tz = parts.find(p => p.type === 'timeZoneName')?.value || 'GMT';
+    const match = tz.match(/GMT([+-]\d{2}:\d{2})?/);
+    return match?.[1] || '+00:00';
+  })();
+
+  const addDaysISO = (days) => {
+    const d = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+    return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  };
+
+  const prompt = `HOJE: ${today} (UK, offset ${ukOffset}).
+Extraia a data do texto abaixo e devolva JSON com "due_at_iso" no formato ISO 8601 (ex: "${today}T10:00:00${ukOffset}").
+Horário padrão: 10:00 (horário de mercado).
+Datas relativas:
+- "hoje" → ${today}
+- "amanhã" → ${addDaysISO(1)}
+- "depois de amanhã" → ${addDaysISO(2)}
+- "fim de semana" / "sábado" → próximo sábado
+- "domingo" → próximo domingo
+- Dia da semana → próxima ocorrência
+- "dia X" sem mês → mês atual se X >= hoje, senão próximo mês
+
+Se não conseguir extrair data, devolva {"due_at_iso": null}.
+Responda APENAS com JSON.
+
+Texto: "${text}"`;
+
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 80,
+        temperature: 0,
+        response_format: { type: 'json_object' }
+      })
+    });
+    if (!res.ok) {
+      console.error('parseShoppingDate failed:', res.status);
+      return null;
+    }
+    const data = await res.json();
+    const raw = data.choices?.[0]?.message?.content || '{}';
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('parseShoppingDate error:', err);
+    return null;
+  }
 }
 
 // ============================================
