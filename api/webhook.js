@@ -6,7 +6,7 @@
 // Personas ativas (2): ceo (Focado), tiolegal (Descontraído) — com regra anti-alucinação
 // Phase 4: due_at (ISO date) e task_status (pending/done) salvos pra cron proativo
 // Cron separado em api/cron.js — roda diário, manda reminders e follow-ups
-// Arquitetura v14: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron + dedup + timezone dinâmico + reaction condicional + shopping list 4.4 (intercept resposta de data)
+// Arquitetura v15: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron + dedup + timezone dinâmico + reaction condicional + shopping list 4.4 + recorrência 4.5 (recurrence_rule + advance de LEMBRETES recorrentes)
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -1059,6 +1059,27 @@ async function processMessage(body) {
 }
 
 // ============================================
+// FETCH MESSAGE BY ID (usado no follow-up advance de recurring LEMBRETES, Phase 4.5)
+// ============================================
+async function fetchMessageById(messageId) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/messages?id=eq.${encodeURIComponent(messageId)}&select=id,category,metadata,due_at,task_status&limit=1`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
+  if (!res.ok) {
+    console.error('fetchMessageById failed:', res.status);
+    return null;
+  }
+  const rows = await res.json();
+  return rows?.[0] || null;
+}
+
+// ============================================
 // MESSAGES DEDUP HELPER (Fix #9 — at-least-once delivery da Meta)
 // ============================================
 async function checkMessageProcessed(waMessageId) {
@@ -1293,9 +1314,29 @@ async function handleFollowupResponse(user, phoneNumber, action, originalText) {
   const persona = user.persona || 'ceo';
   const memoName = user.memo_name || 'Memo';
 
-  // 1. Atualizar task_status na mensagem original
+  // 1. Buscar a mensagem pra checar se é recorrente (Phase 4.5)
+  const targetMessage = await fetchMessageById(messageId);
+  const recurrenceRule = targetMessage?.metadata?.recurrence_rule || null;
+  const isRecurringLembretes = targetMessage?.category === 'LEMBRETES' && recurrenceRule;
+
+  // 2. Decidir qual PATCH fazer:
+  // - Recurring LEMBRETES + action=done: avança due_at pra próxima ocorrência, mantém pending
+  // - Qualquer outro: muda task_status conforme action
   const statusMap = { done: 'done', snoozed: 'snoozed', cancelled: 'cancelled' };
   const newStatus = statusMap[action] || 'pending';
+
+  let patchBody = { task_status: newStatus };
+
+  if (isRecurringLembretes && action === 'done') {
+    const next = nextOccurrence(recurrenceRule, new Date());
+    if (next) {
+      patchBody = {
+        task_status: 'pending',           // Mantém ativo pra próximo ciclo
+        due_at: next.toISOString()
+      };
+      console.log(`Recurring LEMBRETES: advancing due_at to ${next.toISOString()}`);
+    }
+  }
 
   try {
     const res = await fetch(
@@ -1308,7 +1349,7 @@ async function handleFollowupResponse(user, phoneNumber, action, originalText) {
           Authorization: `Bearer ${SUPABASE_KEY}`,
           Prefer: 'return=minimal'
         },
-        body: JSON.stringify({ task_status: newStatus })
+        body: JSON.stringify(patchBody)
       }
     );
     if (!res.ok) {
@@ -1318,7 +1359,7 @@ async function handleFollowupResponse(user, phoneNumber, action, originalText) {
     console.error('task_status update error:', err);
   }
 
-  // 2. Limpar follow-up pendente do user
+  // 3. Limpar follow-up pendente do user
   await updateUser(phoneNumber, { pending_followup_id: null });
 
   // 3. Gerar confirmação na persona
@@ -1545,6 +1586,97 @@ Texto: "${text}"`;
 }
 
 // ============================================
+// RECURRENCE HELPERS (Phase 4.5)
+// Valida e calcula próximas ocorrências de eventos recorrentes
+// ============================================
+
+// Valida a estrutura do recurrence_rule vinda do GPT
+function validateRecurrenceRule(rule) {
+  if (!rule || typeof rule !== 'object') return null;
+  const validFreqs = ['WEEKLY', 'MONTHLY', 'DAILY'];
+  const freq = (rule.freq || '').toUpperCase();
+  if (!validFreqs.includes(freq)) return null;
+
+  const normalized = { freq };
+
+  if (freq === 'WEEKLY') {
+    const byDay = Array.isArray(rule.by_day) ? rule.by_day.filter(d => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+    if (byDay.length === 0) return null;
+    normalized.by_day = byDay;
+  }
+
+  if (freq === 'MONTHLY') {
+    const day = Number(rule.by_month_day);
+    if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+    normalized.by_month_day = day;
+  }
+
+  if (rule.time && typeof rule.time === 'string' && /^\d{2}:\d{2}$/.test(rule.time)) {
+    normalized.time = rule.time;
+  }
+
+  return normalized;
+}
+
+// Calcula a PRÓXIMA ocorrência de um recurrence_rule (a partir de "from", exclusivo)
+// Retorna Date ou null
+function nextOccurrence(rule, from = new Date()) {
+  if (!rule || !rule.freq) return null;
+  const [hh, mm] = (rule.time || '09:00').split(':').map(Number);
+
+  const toUkDate = (d) => {
+    const ukString = d.toLocaleString('en-GB', { timeZone: 'Europe/London' });
+    const [datePart, timePart] = ukString.split(', ');
+    const [day, month, year] = datePart.split('/').map(Number);
+    const [h, m, s] = timePart.split(':').map(Number);
+    return new Date(year, month - 1, day, h, m, s);
+  };
+
+  const ukFrom = toUkDate(from);
+
+  if (rule.freq === 'DAILY') {
+    const next = new Date(ukFrom);
+    next.setHours(hh, mm, 0, 0);
+    if (next <= ukFrom) next.setDate(next.getDate() + 1);
+    return next;
+  }
+
+  if (rule.freq === 'WEEKLY') {
+    const today = ukFrom.getDay();
+    let minDays = Infinity;
+    for (const target of rule.by_day) {
+      let diff = (target - today + 7) % 7;
+      // Se é o mesmo dia, verifica se o horário já passou
+      if (diff === 0) {
+        const sameDayTarget = new Date(ukFrom);
+        sameDayTarget.setHours(hh, mm, 0, 0);
+        if (sameDayTarget <= ukFrom) diff = 7;
+      }
+      if (diff < minDays) minDays = diff;
+    }
+    const next = new Date(ukFrom);
+    next.setDate(next.getDate() + minDays);
+    next.setHours(hh, mm, 0, 0);
+    return next;
+  }
+
+  if (rule.freq === 'MONTHLY') {
+    const day = rule.by_month_day;
+    const next = new Date(ukFrom);
+    next.setDate(day);
+    next.setHours(hh, mm, 0, 0);
+    if (next <= ukFrom) {
+      next.setMonth(next.getMonth() + 1);
+      next.setDate(day);
+      next.setHours(hh, mm, 0, 0);
+    }
+    return next;
+  }
+
+  return null;
+}
+
+// ============================================
 // CATEGORIZAÇÃO (GPT-4o-mini JSON) — Phase 4 update: inclui due_at_iso
 // ============================================
 async function categorize(text) {
@@ -1650,6 +1782,16 @@ Regra mnemônica: passado confirmado vira log (FINANCAS/COMPRAS); evento marcado
 
 EXTRAÇÃO DE METADADOS IMPORTANTES:
 - "recurrence": se a mensagem explicita um padrão de repetição ("todo sábado", "toda semana", "todo dia 5"), capture em linguagem natural. Senão null.
+- "recurrence_rule": se o item é RECORRENTE, devolva um JSON estruturado (senão null):
+  { "freq": "WEEKLY" | "MONTHLY" | "DAILY", "by_day": [1,3,5] (Seg=1...Dom=0, só se WEEKLY), "by_month_day": 5 (só se MONTHLY, 1-31), "time": "HH:MM" (opcional) }
+  Exemplos:
+  - "academia segunda, quarta e sexta 7h" → { "freq": "WEEKLY", "by_day": [1,3,5], "time": "07:00" }
+  - "todo sábado" → { "freq": "WEEKLY", "by_day": [6] }
+  - "toda terça 18h" → { "freq": "WEEKLY", "by_day": [2], "time": "18:00" }
+  - "pagar council tax todo dia 5" → { "freq": "MONTHLY", "by_month_day": 5 }
+  - "mercado todo sábado de manhã" → { "freq": "WEEKLY", "by_day": [6], "time": "09:00" }
+  - "todo dia" → { "freq": "DAILY" }
+  IMPORTANTE: Mapa de dias (by_day): Domingo=0, Segunda=1, Terça=2, Quarta=3, Quinta=4, Sexta=5, Sábado=6. Se não é recorrente (evento one-time), recurrence_rule = null.
 - "shopping_items": se a mensagem implica itens a comprar (compras pendentes OU compras feitas), extraia a lista de itens como array. Ex: "acabou os ovos" → ["ovos"], "comprar leite e pão" → ["leite", "pão"], "comprei sal e açúcar" → ["sal", "açúcar"]. Senão null.
 - "needs_review": true quando a mensagem é ambígua ou tem dois verbos fortes em categorias diferentes (ex: "marcar dentista e pagar recepção").
 - "due_at_iso": se a mensagem menciona data/hora (explícita ou relativa), calcule a data ISO 8601 completa COM timezone UK usando o offset ${ukOffset}. Se só tem data sem hora, use 09:00. Se só tem hora sem data, use HOJE. Se tem recorrência ("todo sábado"), calcule a PRÓXIMA ocorrência. Se não há data nem hora, null.
@@ -1683,6 +1825,7 @@ FORMATO DA RESPOSTA (JSON válido, sem texto fora):
   "date_text": "texto da data como aparece na mensagem, ou null",
   "time_text": "texto do horário como aparece na mensagem, ou null",
   "recurrence": "padrão de repetição em linguagem natural, ou null",
+  "recurrence_rule": { "freq": "...", ... } ou null,
   "shopping_items": ["item1", "item2"] ou null,
   "action_summary": "resumo curto da ação em 3-7 palavras",
   "due_at_iso": "ISO 8601 com timezone UK, ou null"
@@ -1727,6 +1870,9 @@ Responda APENAS com o JSON, nada mais.`;
   const rawCategory = (parsed.category || '').toUpperCase();
   const category = VALID_CATEGORIES.includes(rawCategory) ? rawCategory : 'LEMBRETES';
 
+  // Validar recurrence_rule (Phase 4.5)
+  const recurrenceRule = validateRecurrenceRule(parsed.recurrence_rule);
+
   const metadata = {
     confidence: parsed.confidence || 'medium',
     needs_review: parsed.needs_review || false,
@@ -1735,6 +1881,7 @@ Responda APENAS com o JSON, nada mais.`;
     date_text: parsed.date_text || null,
     time_text: parsed.time_text || null,
     recurrence: parsed.recurrence || null,
+    recurrence_rule: recurrenceRule,
     shopping_items: Array.isArray(parsed.shopping_items) ? parsed.shopping_items : null,
     action_summary: parsed.action_summary || null,
     due_at_iso: parsed.due_at_iso || null
@@ -1749,8 +1896,22 @@ Responda APENAS com o JSON, nada mais.`;
     }
   }
 
-  // task_status: AGENDA e LEMBRETES começam como 'pending', outros null
-  const task_status = (category === 'AGENDA' || category === 'LEMBRETES') ? 'pending' : null;
+  // Phase 4.5: AGENDA recorrente NÃO usa due_at (é ongoing, não one-time)
+  // LEMBRETES recorrente MANTÉM due_at pra 4.3 follow-up funcionar
+  if (category === 'AGENDA' && recurrenceRule) {
+    due_at = null;
+  }
+
+  // task_status: AGENDA e LEMBRETES começam como 'pending' normalmente.
+  // AGENDA recorrente NÃO tem task_status (não é uma task a fechar, é um evento que repete)
+  let task_status;
+  if (category === 'AGENDA' && recurrenceRule) {
+    task_status = null;
+  } else if (category === 'AGENDA' || category === 'LEMBRETES') {
+    task_status = 'pending';
+  } else {
+    task_status = null;
+  }
 
   return { category, metadata, due_at, task_status };
 }
