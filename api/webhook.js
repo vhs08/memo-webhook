@@ -1,11 +1,12 @@
-// Memo Assistant — WhatsApp Webhook Handler (Phase 4.3 — Proativo + Fixes v11)
-// Fluxo: recebe mensagem → dedup (wa_message_id) → (onboarding se user novo) → (áudio vira texto via Whisper)
-//         → categoriza com GPT-4o-mini (timezone dinâmico + datas relativas) → grava no Supabase → GERA REPLY COM PERSONA via Claude
+// Memo Assistant — WhatsApp Webhook Handler (Phase 4.3 — Proativo + Fixes v12)
+// Fluxo: recebe mensagem → dedup (wa_message_id) → reaction 👀 imediata → (onboarding se user novo)
+//         → (áudio vira texto via Whisper) → categoriza com GPT-4o-mini (timezone dinâmico + datas relativas)
+//         → grava no Supabase → GERA REPLY COM PERSONA via Claude
 // Categorias (5): FINANCAS, COMPRAS, AGENDA, IDEIAS, LEMBRETES
 // Personas ativas (2): ceo (Focado), tiolegal (Descontraído) — com regra anti-alucinação
 // Phase 4: due_at (ISO date) e task_status (pending/done) salvos pra cron proativo
 // Cron separado em api/cron.js — roda diário, manda reminders e follow-ups
-// Arquitetura v11: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron + dedup + timezone dinâmico
+// Arquitetura v12: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron + dedup + timezone dinâmico + reaction imediata
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -757,6 +758,12 @@ async function processMessage(body) {
       console.log(`Duplicate webhook ignored: ${waMessageId}`);
       return;
     }
+  }
+
+  // --- Fix #8: Reaction imediata (feedback em <1s enquanto o pipeline roda) ---
+  // Não aguarda (fire-and-forget) pra não bloquear o fluxo principal
+  if (waMessageId) {
+    sendWhatsAppReaction(phoneNumber, waMessageId, '👀').catch(() => {});
   }
 
   // --- Extrai texto bruto da mensagem (suporta texto ou áudio) ---
@@ -1655,5 +1662,40 @@ async function sendWhatsAppReply(to, text) {
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`WhatsApp send failed: ${res.status} ${errText}`);
+  }
+}
+
+// ============================================
+// SEND REACTION (Fix #8 — feedback imediato em <1s enquanto o pipeline roda)
+// Usa emoji 👀 ("estou vendo, processando") como padrão
+// Não bloqueia o fluxo: se falhar, segue em frente
+// ============================================
+async function sendWhatsAppReaction(to, messageId, emoji = '👀') {
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: to,
+          type: 'reaction',
+          reaction: {
+            message_id: messageId,
+            emoji: emoji
+          }
+        })
+      }
+    );
+    if (!res.ok) {
+      console.error('Reaction send failed (non-blocking):', res.status, await res.text());
+    }
+  } catch (err) {
+    console.error('Reaction exception (non-blocking):', err.message);
   }
 }
