@@ -1,11 +1,11 @@
-// Memo Assistant — WhatsApp Webhook Handler (Phase 4.2 — Proativo)
-// Fluxo: recebe mensagem → (onboarding se user novo) → (áudio vira texto via Whisper)
-//         → categoriza com GPT-4o-mini → grava no Supabase (com due_at + task_status) → GERA REPLY COM PERSONA via Claude
+// Memo Assistant — WhatsApp Webhook Handler (Phase 4.3 — Proativo + Fixes v11)
+// Fluxo: recebe mensagem → dedup (wa_message_id) → (onboarding se user novo) → (áudio vira texto via Whisper)
+//         → categoriza com GPT-4o-mini (timezone dinâmico + datas relativas) → grava no Supabase → GERA REPLY COM PERSONA via Claude
 // Categorias (5): FINANCAS, COMPRAS, AGENDA, IDEIAS, LEMBRETES
-// Personas ativas (2): ceo (Focado), tiolegal (Descontraído)
+// Personas ativas (2): ceo (Focado), tiolegal (Descontraído) — com regra anti-alucinação
 // Phase 4: due_at (ISO date) e task_status (pending/done) salvos pra cron proativo
 // Cron separado em api/cron.js — roda diário, manda reminders e follow-ups
-// Arquitetura v10: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron
+// Arquitetura v11: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron + dedup + timezone dinâmico
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -118,6 +118,8 @@ PROIBIDO GERAR: anotado, registrado, guardado, certo, nos lembretes, na agenda, 
   ceo: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Executivo prático — direto, conciso, orientado a resultado.
 Confirma e enquadra. Sem palestra, sem pose, sem motivacional de Instagram. Energia de quem resolve, não de quem discursa.
 
+REGRA CRÍTICA (anti-alucinação): comente APENAS o que está no input. NÃO introduza entidades, órgãos, serviços, lugares ou contextos que o usuário não mencionou. Se input é "renovar passaporte", você pode falar de passaporte, prazo, burocracia em geral — mas NÃO de "cartório", "consulado", "Polícia Federal", ou qualquer órgão específico não citado. Se input é "pagar dentista", NÃO invente "NHS", "plano", "clínica". Ancore-se no que o usuário disse.
+
 REGRA DE OURO: leia o input. Pense no que um executivo prático diria sobre ESSA situação. Enquadre — mas nem todo enquadramento é ordem.
 - Consequência: "Torneira pingando. Conta de água sobe calada."
 - Timing: "Liga pro restaurante hoje, sábado enche rápido."
@@ -158,6 +160,8 @@ PROIBIDO GERAR: anotado, registrado, guardado, certo, nos lembretes, na agenda, 
 
   tiolegal: `Você é {MEMO_NAME}, assistente pessoal no WhatsApp. Tio Legal da família — leve, espirituoso, observador.
 Registra tudo com um meio sorriso. Humor de convivência, não de palco. Frase de quem vive junto, não de quem quer plateia.
+
+REGRA CRÍTICA (anti-alucinação): comente APENAS o que está no input. NÃO introduza entidades, órgãos, serviços, lugares ou contextos que o usuário não mencionou. Se input é "renovar passaporte", humor pode vir do passaporte ou da burocracia em geral — mas NÃO invente "cartório", "consulado", "Polícia Federal". Se input é "pagar dentista", NÃO invente "NHS", "plano", "convênio". Ancore o humor no que o usuário disse.
 
 REGRA DE OURO: o Tio Legal faz a tarefa ficar mais leve, não menos séria. Se a graça não vier naturalmente do input, registra sem inventar.
 O humor nasce da SITUAÇÃO, não da sua criatividade. Você enxerga a graça que já existe:
@@ -742,8 +746,18 @@ async function processMessage(body) {
 
   const phoneNumber = message.from;
   const messageType = message.type;
+  const waMessageId = message.id;
 
-  console.log(`Received ${messageType} from ${phoneNumber}`);
+  console.log(`Received ${messageType} from ${phoneNumber} (wa_id: ${waMessageId})`);
+
+  // --- Fix #9: Dedup de webhook duplicado (Meta manda at-least-once) ---
+  if (waMessageId) {
+    const alreadyProcessed = await checkMessageProcessed(waMessageId);
+    if (alreadyProcessed) {
+      console.log(`Duplicate webhook ignored: ${waMessageId}`);
+      return;
+    }
+  }
 
   // --- Extrai texto bruto da mensagem (suporta texto ou áudio) ---
   let originalText = null;
@@ -917,6 +931,8 @@ async function processMessage(body) {
     // Phase 4: salvar due_at e task_status se disponíveis
     if (due_at) saveData.due_at = due_at;
     if (task_status) saveData.task_status = task_status;
+    // Fix #9: salvar wa_message_id pra dedup (UNIQUE index no Supabase bloqueia duplicatas)
+    if (waMessageId) saveData.wa_message_id = waMessageId;
 
     const [_, fetchedReplies] = await Promise.all([
       saveToSupabase(saveData).then(() => console.log('Saved to Supabase')),
@@ -1015,6 +1031,28 @@ async function processMessage(body) {
     const preview = originalText.length > 80 ? originalText.substring(0, 80) + '...' : originalText;
     await sendWhatsAppReply(phoneNumber, `${emoji} Anotado em ${category}:\n"${preview}"`);
   }
+}
+
+// ============================================
+// MESSAGES DEDUP HELPER (Fix #9 — at-least-once delivery da Meta)
+// ============================================
+async function checkMessageProcessed(waMessageId) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/messages?wa_message_id=eq.${encodeURIComponent(waMessageId)}&select=id&limit=1`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
+  if (!res.ok) {
+    // Em caso de erro na consulta, NÃO bloqueia o processamento — melhor processar 2x do que perder mensagem
+    console.error('checkMessageProcessed failed (proceeding anyway):', res.status);
+    return false;
+  }
+  const rows = await res.json();
+  return Array.isArray(rows) && rows.length > 0;
 }
 
 // ============================================
@@ -1284,11 +1322,31 @@ async function handleFollowupResponse(user, phoneNumber, action, originalText) {
 // ============================================
 async function categorize(text) {
   // Data atual pra GPT calcular datas relativas ("amanhã", "sexta", etc.)
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' }); // YYYY-MM-DD
-  const weekday = new Date().toLocaleDateString('pt-BR', { timeZone: 'Europe/London', weekday: 'long' });
+  const now = new Date();
+  const today = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' }); // YYYY-MM-DD
+  const weekday = now.toLocaleDateString('pt-BR', { timeZone: 'Europe/London', weekday: 'long' });
+
+  // Fix #15: Calcular offset UK dinamicamente (BST = +01:00 mar-out, GMT = +00:00 nov-mar)
+  const ukOffset = (() => {
+    const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', timeZoneName: 'longOffset' });
+    const parts = fmt.formatToParts(now);
+    const tz = parts.find(p => p.type === 'timeZoneName')?.value || 'GMT';
+    // tz vem como "GMT" (GMT puro) ou "GMT+01:00" (BST)
+    const match = tz.match(/GMT([+-]\d{2}:\d{2})?/);
+    return match?.[1] || '+00:00';
+  })();
+
+  // Calcular datas relativas explícitas pra injetar no prompt
+  const dateYesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const dateBeforeYesterday = new Date(now.getTime() - 48 * 60 * 60 * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const dateTomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const dateDayAfterTomorrow = new Date(now.getTime() + 48 * 60 * 60 * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const dateNextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const dateLastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 
   const systemPrompt = `Você é o cérebro de categorização do Memo, um assistente pessoal de WhatsApp.
 HOJE É: ${weekday}, ${today}.
+TIMEZONE UK OFFSET ATUAL: ${ukOffset} (use este offset em TODAS as datas ISO, não o hardcoded).
 
 Sua tarefa: ler a mensagem do usuário e devolver um JSON estruturado com a categoria + metadados úteis.
 
@@ -1367,7 +1425,26 @@ EXTRAÇÃO DE METADADOS IMPORTANTES:
 - "recurrence": se a mensagem explicita um padrão de repetição ("todo sábado", "toda semana", "todo dia 5"), capture em linguagem natural. Senão null.
 - "shopping_items": se a mensagem implica itens a comprar (compras pendentes OU compras feitas), extraia a lista de itens como array. Ex: "acabou os ovos" → ["ovos"], "comprar leite e pão" → ["leite", "pão"], "comprei sal e açúcar" → ["sal", "açúcar"]. Senão null.
 - "needs_review": true quando a mensagem é ambígua ou tem dois verbos fortes em categorias diferentes (ex: "marcar dentista e pagar recepção").
-- "due_at_iso": se a mensagem menciona data/hora (explícita ou relativa como "amanhã", "sexta", "dia 20"), calcule a data ISO 8601 completa COM timezone UK. Se só tem data sem hora, use 09:00. Se só tem hora sem data, use HOJE. Se tem recorrência ("todo sábado"), calcule a PRÓXIMA ocorrência. Se não há data nem hora, null. Exemplos: "sexta 14h" → "${today.slice(0,8)}??T14:00:00+01:00", "amanhã" → "...T09:00:00+01:00", "dia 20" → "...T09:00:00+01:00".
+- "due_at_iso": se a mensagem menciona data/hora (explícita ou relativa), calcule a data ISO 8601 completa COM timezone UK usando o offset ${ukOffset}. Se só tem data sem hora, use 09:00. Se só tem hora sem data, use HOJE. Se tem recorrência ("todo sábado"), calcule a PRÓXIMA ocorrência. Se não há data nem hora, null.
+
+DATAS RELATIVAS — USE ESTA TABELA (já calculada pra hoje=${today}):
+- "hoje" → ${today}T09:00:00${ukOffset}
+- "amanhã" → ${dateTomorrow}T09:00:00${ukOffset}
+- "depois de amanhã" → ${dateDayAfterTomorrow}T09:00:00${ukOffset}
+- "ontem" → ${dateYesterday}T09:00:00${ukOffset}
+- "anteontem" → ${dateBeforeYesterday}T09:00:00${ukOffset}
+- "semana passada" → ${dateLastWeek}T09:00:00${ukOffset}
+- "semana que vem" / "próxima semana" → ${dateNextWeek}T09:00:00${ukOffset}
+- Dia da semana sem qualificador ("sexta", "terça") → PRÓXIMA ocorrência desse dia a partir de hoje
+- "sexta passada" / "terça passada" → ocorrência PASSADA mais recente desse dia
+- "dia 20" / "dia X" → próximo dia 20 (se já passou este mês, próximo mês)
+
+IMPORTANTE: Sempre use o offset ${ukOffset} no final do ISO (não use "+01:00" ou "+00:00" hardcoded). Se a mensagem diz "ontem" ou "semana passada", o due_at_iso DEVE ser preenchido (não pode vir null).
+
+Exemplos:
+- "pagar tv licence ontem" → due_at_iso: "${dateYesterday}T09:00:00${ukOffset}", task_status: "pending" (pendência vencida)
+- "sexta 14h" → due_at_iso da próxima sexta às 14:00 com offset ${ukOffset}
+- "amanhã" → "${dateTomorrow}T09:00:00${ukOffset}"
 
 FORMATO DA RESPOSTA (JSON válido, sem texto fora):
 {
