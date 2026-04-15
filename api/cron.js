@@ -1,10 +1,10 @@
-// Memo Assistant — Proactive Engine (Phase 4.4 — Shopping List)
-// Roda via Vercel Cron — gera lembretes, follow-ups, shopping lists
+// Memo Assistant — Proactive Engine (Phase 4.5 — Recorrência)
+// Roda via Vercel Cron — gera lembretes, follow-ups, shopping lists, recurring events
 // Arquitetura: composição estruturada + persona via Claude
-// Sub-fases ativas: 4.2 pre-event reminders, 4.3 follow-up de pendências, 4.4 shopping list semanal
-// Sub-fases placeholder: 4.5 recorrência, 4.6 post-event, 4.7 daily briefing
+// Sub-fases ativas: 4.2 pre-event reminders, 4.3 follow-up de pendências, 4.4 shopping list semanal, 4.5 recorrência
+// Sub-fases placeholder: 4.6 post-event, 4.7 daily briefing
 // Cron schedules (vercel.json):
-//   - 0 7 * * * (daily 7h UTC)  → reminders + follow-ups + shopping saturday reminder
+//   - 0 7 * * * (daily 7h UTC)  → reminders + follow-ups + shopping saturday reminder + recurring matches
 //   - 0 17 * * 5 (friday 17h UTC = 18h BST) → shopping list send
 
 // ============================================
@@ -218,6 +218,36 @@ async function processUser(user, now, ukNow) {
           sent++;
           console.log(`[Cron] ${phone}: sent followup — "${message}"`);
         }
+      }
+    }
+  }
+
+  // ---- 4.5 — RECORRÊNCIA (recurring events reminders) ----
+  // Todos os dias checa: hoje bate com algum recurrence_rule do user?
+  if (user.reminders_enabled !== false && remaining > 0) {
+    const recurringToday = await getRecurringItemsForToday(phone, ukNow);
+    console.log(`[Cron] ${phone}: ${recurringToday.length} recurring items matching today`);
+
+    for (const item of recurringToday) {
+      if (remaining <= 0) break;
+      // Dedup: usa (message_id + data de hoje) como reference pra proactive_log
+      const todayKey = ukNow.toISOString().slice(0, 10); // YYYY-MM-DD
+      const refId = `${item.id}::${todayKey}`;
+      const alreadySent = await wasProactiveSent(phone, 'reminder', refId);
+      if (alreadySent) continue;
+
+      const entity = buildRecurringEntity(item);
+      const message = await generateProactiveMessage(user, {
+        type: 'reminder_today',
+        entity: entity
+      });
+
+      if (message) {
+        await sendWhatsAppMessage(phone, message);
+        await logProactive(phone, 'reminder', refId, message);
+        remaining--;
+        sent++;
+        console.log(`[Cron] ${phone}: sent recurring reminder — "${message}"`);
       }
     }
   }
@@ -549,6 +579,64 @@ function addDays(date, days) {
   const result = new Date(date);
   result.setDate(result.getDate() + days);
   return result;
+}
+
+// ============================================
+// RECURRENCE HELPERS (Phase 4.5) — duplicado do webhook.js
+// ============================================
+
+// Retorna true se o recurrence_rule bate com o dia atual (UK time)
+function recurrenceMatchesToday(rule, ukNow) {
+  if (!rule || !rule.freq) return false;
+
+  if (rule.freq === 'DAILY') return true;
+
+  if (rule.freq === 'WEEKLY') {
+    if (!Array.isArray(rule.by_day)) return false;
+    return rule.by_day.includes(ukNow.getDay());
+  }
+
+  if (rule.freq === 'MONTHLY') {
+    return rule.by_month_day === ukNow.getDate();
+  }
+
+  return false;
+}
+
+// Busca todos os items do user com recurrence_rule não-null
+async function getRecurringItems(phoneNumber) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/messages?phone_number=eq.${encodeURIComponent(phoneNumber)}&metadata->recurrence_rule=not.is.null&select=id,original_text,category,metadata&order=created_at.desc`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
+
+  if (!res.ok) {
+    console.error('[Cron] getRecurringItems failed:', res.status, await res.text());
+    return [];
+  }
+
+  return await res.json();
+}
+
+// Filtra recurring items que batem com hoje
+async function getRecurringItemsForToday(phoneNumber, ukNow) {
+  const all = await getRecurringItems(phoneNumber);
+  return all.filter(item => {
+    const rule = item?.metadata?.recurrence_rule;
+    return recurrenceMatchesToday(rule, ukNow);
+  });
+}
+
+// Monta entity pra prompt de reminder de recorrente
+function buildRecurringEntity(item) {
+  const summary = item?.metadata?.action_summary || item?.metadata?.clean_text || item?.original_text || 'Compromisso recorrente';
+  const time = item?.metadata?.recurrence_rule?.time;
+  return time ? `${summary} às ${time}` : summary;
 }
 
 // ============================================
