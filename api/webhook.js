@@ -1454,6 +1454,7 @@ async function fetchPendingShoppingItemsForUser(phoneNumber) {
 async function parseShoppingDate(text) {
   const now = new Date();
   const today = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const weekday = now.toLocaleDateString('pt-BR', { timeZone: 'Europe/London', weekday: 'long' });
 
   const ukOffset = (() => {
     const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', timeZoneName: 'longOffset' });
@@ -1468,20 +1469,50 @@ async function parseShoppingDate(text) {
     return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
   };
 
-  const prompt = `HOJE: ${today} (UK, offset ${ukOffset}).
+  // Calcula próxima ocorrência de cada dia da semana (pt-BR)
+  // getDay(): 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sab
+  const ukDayOfWeek = parseInt(now.toLocaleDateString('en-US', { timeZone: 'Europe/London', weekday: 'narrow' }) || '0', 10) || 0;
+  // Melhor: calcula direto via toLocaleDateString com weekday
+  const getDayIdx = () => {
+    const map = { 'domingo': 0, 'segunda-feira': 1, 'terça-feira': 2, 'quarta-feira': 3, 'quinta-feira': 4, 'sexta-feira': 5, 'sábado': 6 };
+    return map[weekday.toLowerCase()] ?? 0;
+  };
+  const todayIdx = getDayIdx();
+  const daysUntil = (targetIdx) => {
+    // Retorna quantos dias até a PRÓXIMA ocorrência (se hoje é o dia, retorna 7)
+    const diff = (targetIdx - todayIdx + 7) % 7;
+    return diff === 0 ? 7 : diff;
+  };
+  const nextSegunda = addDaysISO(daysUntil(1));
+  const nextTerca = addDaysISO(daysUntil(2));
+  const nextQuarta = addDaysISO(daysUntil(3));
+  const nextQuinta = addDaysISO(daysUntil(4));
+  const nextSexta = addDaysISO(daysUntil(5));
+  const nextSabado = addDaysISO(daysUntil(6));
+  const nextDomingo = addDaysISO(daysUntil(0));
+
+  const prompt = `HOJE: ${today} (${weekday}, UK, offset ${ukOffset}).
 Extraia a data do texto abaixo e devolva JSON com "due_at_iso" no formato ISO 8601 (ex: "${today}T10:00:00${ukOffset}").
 Horário padrão: 10:00 (horário de mercado).
-Datas relativas:
+
+DATAS RELATIVAS (use esta tabela — já calculada pra hoje=${weekday} ${today}):
 - "hoje" → ${today}
 - "amanhã" → ${addDaysISO(1)}
 - "depois de amanhã" → ${addDaysISO(2)}
-- "fim de semana" / "sábado" → próximo sábado
-- "domingo" → próximo domingo
-- Dia da semana → próxima ocorrência
-- "dia X" sem mês → mês atual se X >= hoje, senão próximo mês
+- "segunda" / "segunda-feira" → ${nextSegunda}
+- "terça" / "terça-feira" → ${nextTerca}
+- "quarta" / "quarta-feira" → ${nextQuarta}
+- "quinta" / "quinta-feira" → ${nextQuinta}
+- "sexta" / "sexta-feira" → ${nextSexta}
+- "sábado" / "sabado" / "fim de semana" → ${nextSabado}
+- "domingo" → ${nextDomingo}
+- "dia X" sem mês especificado → ${today.slice(0, 7)}-X se X >= ${today.slice(8, 10)}, senão próximo mês
 
-Se não conseguir extrair data, devolva {"due_at_iso": null}.
-Responda APENAS com JSON.
+REGRAS:
+- Use SEMPRE o offset ${ukOffset} no ISO final.
+- Se o texto não contém data alguma (ex: "nao sei", "depois", "talvez"), devolva {"due_at_iso": null}.
+
+Responda APENAS com JSON válido, sem texto fora.
 
 Texto: "${text}"`;
 
