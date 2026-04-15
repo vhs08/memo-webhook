@@ -425,18 +425,28 @@ async function generateProactiveMessage(user, context) {
 
   const systemPrompt = personaConfig.system.replace(/\{MEMO_NAME\}/g, memoName);
 
-  // Few-shot: exemplos do mesmo tipo de mensagem proativa
+  // Prompt prefix específico por tipo — evita que Claude confunda post_event com reminder
+  const PROMPT_PREFIXES = {
+    followup: 'Gere follow-up perguntando se o usuário resolveu:',
+    post_event: 'Gere pergunta pós-evento. O compromisso JÁ ACONTECEU no passado — pergunte como foi, em tom empático:',
+    post_event_nudge: 'Gere segunda cobrança pós-evento (usuário não respondeu ainda). Tom de assistente atento querendo fechar o ciclo, sem impor:',
+    shopping_list_send: 'Gere mensagem consolidando lista de compras da semana e perguntando quando o usuário vai ao mercado:',
+    shopping_list_date_reminder: 'Gere lembrete sobre lista da semana ainda em aberto, perguntando o dia da compra de novo:',
+    reminder_recurring: 'Gere lembrete proativo para compromisso recorrente (o label de dia "hoje"/"amanhã"/"sexta" já está na entity, use-o):',
+    reminder_today: 'Gere lembrete proativo para hoje:',
+    reminder_tomorrow: 'Gere lembrete proativo para amanhã:'
+  };
+  const promptPrefix = PROMPT_PREFIXES[context.type] || 'Gere lembrete proativo para:';
+
+  // Few-shot: exemplos do mesmo tipo de mensagem proativa (usando o prefix correspondente pra dar contexto)
   const messages = [];
   const relevantExamples = personaConfig.examples.filter(ex => ex.type === context.type);
   for (const ex of relevantExamples) {
-    messages.push({ role: 'user', content: `Gere lembrete proativo para: ${ex.entity}` });
+    messages.push({ role: 'user', content: `${promptPrefix} ${ex.entity}` });
     messages.push({ role: 'assistant', content: ex.output });
   }
 
   // Mensagem real
-  const promptPrefix = context.type === 'followup'
-    ? 'Gere follow-up perguntando se o usuário resolveu:'
-    : 'Gere lembrete proativo para:';
   messages.push({ role: 'user', content: `${promptPrefix} ${context.entity}` });
 
   try {
