@@ -1254,16 +1254,18 @@ async function classifyFollowupResponse(text) {
   const lower = (text || '').toLowerCase().trim();
 
   // Pattern matching rápido pra respostas óbvias (evita chamada GPT)
-  const donePatterns = /^(sim|feito|já|ja|fiz|paguei|comprei|marquei|resolvi|resolvido|pronto|ok|beleza|done|yes|yep|fiz sim|já fiz|já paguei|já comprei|já marquei|tá feito|ta feito|foi|mandei)$/i;
-  const snoozePatterns = /^(não|nao|ainda não|ainda nao|depois|amanhã|amanha|semana que vem|mais tarde|no|not yet|vou fazer|vou resolver|ainda|pendente)$/i;
-  const cancelPatterns = /^(cancela|cancelar|esquece|não precisa|nao precisa|remove|tira|desiste|ignora|não quero|nao quero)$/i;
+  // Regex com (palavra)(\b|$) permite trailing text tipo "foi tudo bem", "já paguei agora"
+  const donePatterns = /^(sim|feito|feita|já|ja|fiz|paguei|comprei|marquei|resolvi|resolvido|pronto|pronta|ok|okay|beleza|done|yes|yep|foi|mandei|tá feito|ta feito|tá resolvido|ta resolvido|renovei|entreguei|cumpri)\b/i;
+  const postEventGoodPatterns = /^(foi (tudo )?(bem|bom|ótimo|otimo|legal|massa|tranquilo|tranquilla|show|perfeito|rápido|rapido|ok|normal|certo)|tudo (bem|certo|ok|tranquilo)|correu bem|deu tudo certo|foi suave|sem problema|ganhei|ganhamos|perdi|perdemos)/i;
+  const snoozePatterns = /^(não|nao|ainda não|ainda nao|depois|amanhã|amanha|semana que vem|mais tarde|no|not yet|vou fazer|vou resolver|ainda|pendente|hoje mais tarde|fim de semana)\b/i;
+  const cancelPatterns = /^(cancela|cancelar|esquece|não precisa|nao precisa|remove|tira|desiste|ignora|não quero|nao quero|cancelado|cancelou|remarcou|adiou)\b/i;
 
-  if (donePatterns.test(lower)) return 'done';
+  if (donePatterns.test(lower) || postEventGoodPatterns.test(lower)) return 'done';
   if (snoozePatterns.test(lower)) return 'snoozed';
   if (cancelPatterns.test(lower)) return 'cancelled';
 
-  // Mensagem longa (>60 chars) = provavelmente input novo, não resposta
-  if (lower.length > 60) return 'new_message';
+  // Mensagem longa (>80 chars) = provavelmente input novo, não resposta
+  if (lower.length > 80) return 'new_message';
 
   // Mensagem curta mas ambígua — usar GPT pra classificar
   try {
@@ -1278,12 +1280,18 @@ async function classifyFollowupResponse(text) {
         messages: [
           {
             role: 'system',
-            content: `O usuário recebeu uma pergunta de follow-up sobre uma pendência (ex: "Você pagou a TV licence?").
-Agora ele respondeu. Classifique a resposta em EXATAMENTE uma das 4 opções:
-- "done" — tarefa foi concluída (sim, feito, já paguei, resolvi, etc.)
-- "snoozed" — vai fazer depois (ainda não, depois, amanhã, vou fazer, etc.)
-- "cancelled" — não quer mais fazer (cancela, esquece, não precisa, etc.)
-- "new_message" — não é resposta ao follow-up, é uma mensagem nova sobre outro assunto
+            content: `O usuário recebeu uma pergunta de follow-up do assistente. Pode ser:
+(a) Pendência: "Você pagou a TV licence?" / "Já renovou o passaporte?"
+(b) Pós-evento: "Como foi a dentista do Luigi?" / "Reunião foi tudo certo?"
+(c) Lista: "Qual o dia do mercado?"
+
+Agora ele respondeu. Classifique em EXATAMENTE uma das 4 opções:
+- "done" — tarefa concluída OU evento aconteceu bem (sim, feito, paguei, foi bom, foi tranquilo, tudo certo, correu bem, etc.)
+- "snoozed" — ainda vai fazer OU pede mais tempo (ainda não, depois, amanhã, vou fazer, etc.)
+- "cancelled" — não vai mais acontecer (cancela, remarcou, adiou indefinidamente, esquece, não precisa, etc.)
+- "new_message" — não é resposta ao follow-up, é assunto totalmente novo
+
+REGRA CRÍTICA: para pós-evento, respostas qualitativas tipo "foi bem", "foi chato", "correu tranquilo", "tudo certo" são SEMPRE "done" (o evento aconteceu, loop fecha).
 
 Responda APENAS com a palavra: done, snoozed, cancelled, ou new_message.`
           },
