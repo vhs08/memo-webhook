@@ -66,7 +66,12 @@ Use "pra/pro", tom WhatsApp informal de executivo.`,
       { type: 'shopping_list_send', entity: 'leite, ovos, café, papel higiênico', output: 'Lista da semana: leite, ovos, café, papel higiênico. Quando vai fazer a compra?' },
       { type: 'shopping_list_send', entity: 'arroz, frango, detergente', output: 'Lista pendente: arroz, frango, detergente. Qual o dia do mercado?' },
       { type: 'shopping_list_date_reminder', entity: 'leite, ovos, café', output: 'Lista da semana ainda aberta. Qual o dia do mercado?' },
-      { type: 'shopping_list_date_reminder', entity: 'arroz, frango', output: 'Mercado dessa semana — qual o dia?' }
+      { type: 'shopping_list_date_reminder', entity: 'arroz, frango', output: 'Mercado dessa semana — qual o dia?' },
+      { type: 'reminder_recurring', entity: 'ir à academia hoje às 07:00', output: 'Academia hoje às 7h. Sai antes.' },
+      { type: 'reminder_recurring', entity: 'ir à academia sexta às 07:00', output: 'Academia sexta às 7h. Deixa a mochila pronta na quinta.' },
+      { type: 'reminder_recurring', entity: 'pagar council tax hoje', output: 'Council tax hoje. Resolve de manhã.' },
+      { type: 'reminder_recurring', entity: 'mercado hoje às 09:00', output: 'Mercado hoje às 9h. Leva a lista.' },
+      { type: 'reminder_recurring', entity: 'futebol do Luigi amanhã às 09:00', output: 'Futebol do Luigi amanhã 9h. Chuteira pronta hoje.' }
     ]
   },
   tiolegal: {
@@ -92,7 +97,12 @@ Use "pra/pro", tom WhatsApp informal de tio.`,
       { type: 'shopping_list_send', entity: 'leite, ovos, café, papel higiênico', output: 'Lista da semana tá aqui: leite, ovos, café, papel higiênico. Qual o dia do mercado?' },
       { type: 'shopping_list_send', entity: 'arroz, frango, detergente', output: 'Lista pro mercado: arroz, frango, detergente. Qual dia vai?' },
       { type: 'shopping_list_date_reminder', entity: 'leite, ovos, café', output: 'E a lista da semana, qual o dia do mercado?' },
-      { type: 'shopping_list_date_reminder', entity: 'arroz, frango', output: 'Lista esperando — qual o dia do mercado?' }
+      { type: 'shopping_list_date_reminder', entity: 'arroz, frango', output: 'Lista esperando — qual o dia do mercado?' },
+      { type: 'reminder_recurring', entity: 'ir à academia hoje às 07:00', output: 'Academia hoje 7h. Primeira da semana, já vale.' },
+      { type: 'reminder_recurring', entity: 'ir à academia sexta às 07:00', output: 'Academia sexta 7h. Mochila arrumada na quinta à noite é vitória.' },
+      { type: 'reminder_recurring', entity: 'pagar council tax hoje', output: 'Council tax hoje. Resolve cedo, que à tarde aparece imprevisto.' },
+      { type: 'reminder_recurring', entity: 'mercado hoje às 09:00', output: 'Mercado hoje 9h. Lista na mão e bora.' },
+      { type: 'reminder_recurring', entity: 'futebol do Luigi amanhã às 09:00', output: 'Futebol do Luigi amanhã 9h. Chuteira limpa vira ritual da noite.' }
     ]
   }
 };
@@ -236,9 +246,9 @@ async function processUser(user, now, ukNow) {
       const alreadySent = await wasProactiveSent(phone, 'reminder', refId);
       if (alreadySent) continue;
 
-      const entity = buildRecurringEntity(item);
+      const entity = buildRecurringEntity(item, ukNow);
       const message = await generateProactiveMessage(user, {
-        type: 'reminder_today',
+        type: 'reminder_recurring',
         entity: entity
       });
 
@@ -632,11 +642,89 @@ async function getRecurringItemsForToday(phoneNumber, ukNow) {
   });
 }
 
-// Monta entity pra prompt de reminder de recorrente
-function buildRecurringEntity(item) {
+// Calcula a PRÓXIMA ocorrência de um recurrence_rule (cópia de webhook.js)
+function nextOccurrence(rule, from = new Date()) {
+  if (!rule || !rule.freq) return null;
+  const [hh, mm] = (rule.time || '09:00').split(':').map(Number);
+
+  const toUkDate = (d) => {
+    const ukString = d.toLocaleString('en-GB', { timeZone: 'Europe/London' });
+    const [datePart, timePart] = ukString.split(', ');
+    const [day, month, year] = datePart.split('/').map(Number);
+    const [h, m, s] = timePart.split(':').map(Number);
+    return new Date(year, month - 1, day, h, m, s);
+  };
+
+  const ukFrom = toUkDate(from);
+
+  if (rule.freq === 'DAILY') {
+    const next = new Date(ukFrom);
+    next.setHours(hh, mm, 0, 0);
+    if (next <= ukFrom) next.setDate(next.getDate() + 1);
+    return next;
+  }
+
+  if (rule.freq === 'WEEKLY') {
+    const today = ukFrom.getDay();
+    let minDays = Infinity;
+    for (const target of rule.by_day) {
+      let diff = (target - today + 7) % 7;
+      if (diff === 0) {
+        const sameDayTarget = new Date(ukFrom);
+        sameDayTarget.setHours(hh, mm, 0, 0);
+        if (sameDayTarget <= ukFrom) diff = 7;
+      }
+      if (diff < minDays) minDays = diff;
+    }
+    const next = new Date(ukFrom);
+    next.setDate(next.getDate() + minDays);
+    next.setHours(hh, mm, 0, 0);
+    return next;
+  }
+
+  if (rule.freq === 'MONTHLY') {
+    const day = rule.by_month_day;
+    const next = new Date(ukFrom);
+    next.setDate(day);
+    next.setHours(hh, mm, 0, 0);
+    if (next <= ukFrom) {
+      next.setMonth(next.getMonth() + 1);
+      next.setDate(day);
+      next.setHours(hh, mm, 0, 0);
+    }
+    return next;
+  }
+
+  return null;
+}
+
+// Computa label de dia ("hoje", "amanhã", "sexta") baseado na próxima ocorrência
+function computeDayLabel(nextDate, ukNow) {
+  if (!nextDate) return '';
+  const startToday = new Date(ukNow);
+  startToday.setHours(0, 0, 0, 0);
+  const startNext = new Date(nextDate);
+  startNext.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((startNext - startToday) / (24 * 60 * 60 * 1000));
+
+  if (diffDays <= 0) return 'hoje';
+  if (diffDays === 1) return 'amanhã';
+  const weekdays = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+  return weekdays[nextDate.getDay()];
+}
+
+// Monta entity pra prompt de reminder de recorrente (com label de dia correto)
+function buildRecurringEntity(item, ukNow) {
   const summary = item?.metadata?.action_summary || item?.metadata?.clean_text || item?.original_text || 'Compromisso recorrente';
-  const time = item?.metadata?.recurrence_rule?.time;
-  return time ? `${summary} às ${time}` : summary;
+  const rule = item?.metadata?.recurrence_rule;
+  const time = rule?.time;
+
+  const next = nextOccurrence(rule, ukNow);
+  const dayLabel = computeDayLabel(next, ukNow);
+
+  const dayPart = dayLabel ? ` ${dayLabel}` : '';
+  const timePart = time ? ` às ${time}` : '';
+  return `${summary}${dayPart}${timePart}`;
 }
 
 // ============================================
