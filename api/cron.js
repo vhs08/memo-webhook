@@ -1,7 +1,11 @@
-// Memo Assistant — Proactive Engine (Phase 4)
-// Roda via Vercel Cron — gera lembretes, follow-ups, briefings
+// Memo Assistant — Proactive Engine (Phase 4.4 — Shopping List)
+// Roda via Vercel Cron — gera lembretes, follow-ups, shopping lists
 // Arquitetura: composição estruturada + persona via Claude
-// Sub-fases: 4.2 pre-event reminders (ativo), 4.3/4.7/4.4/4.5/4.6 (placeholder)
+// Sub-fases ativas: 4.2 pre-event reminders, 4.3 follow-up de pendências, 4.4 shopping list semanal
+// Sub-fases placeholder: 4.5 recorrência, 4.6 post-event, 4.7 daily briefing
+// Cron schedules (vercel.json):
+//   - 0 7 * * * (daily 7h UTC)  → reminders + follow-ups + shopping saturday reminder
+//   - 0 17 * * 5 (friday 17h UTC = 18h BST) → shopping list send
 
 // ============================================
 // ENVIRONMENT VARIABLES
@@ -58,7 +62,11 @@ Use "pra/pro", tom WhatsApp informal de executivo.`,
       { type: 'followup', entity: 'Comprar ração do Rocky', output: 'Ração do Rocky. Comprou ou o gato tá passando fome?' },
       { type: 'followup', entity: 'Marcar consulta no GP', output: 'Consulta no GP. Conseguiu marcar?' },
       { type: 'followup', entity: 'Renovar parking permit', output: 'Parking permit. Já renovou?' },
-      { type: 'followup', entity: 'Pagar mensalidade do futebol do Luigi', output: 'Mensalidade do futebol do Luigi. Já pagou?' }
+      { type: 'followup', entity: 'Pagar mensalidade do futebol do Luigi', output: 'Mensalidade do futebol do Luigi. Já pagou?' },
+      { type: 'shopping_list_send', entity: 'leite, ovos, café, papel higiênico', output: 'Lista da semana: leite, ovos, café, papel higiênico. Quando vai fazer a compra?' },
+      { type: 'shopping_list_send', entity: 'arroz, frango, detergente', output: 'Lista pendente: arroz, frango, detergente. Qual o dia do mercado?' },
+      { type: 'shopping_list_date_reminder', entity: 'leite, ovos, café', output: 'Lista da semana ainda aberta. Qual o dia do mercado?' },
+      { type: 'shopping_list_date_reminder', entity: 'arroz, frango', output: 'Mercado dessa semana — qual o dia?' }
     ]
   },
   tiolegal: {
@@ -80,7 +88,11 @@ Use "pra/pro", tom WhatsApp informal de tio.`,
       { type: 'followup', entity: 'Comprar ração do Rocky', output: 'Ração do Rocky — comprou ou o bicho tá organizando protesto?' },
       { type: 'followup', entity: 'Marcar consulta no GP', output: 'Consulta no GP, marcou? NHS com vaga livre é ouro.' },
       { type: 'followup', entity: 'Renovar parking permit', output: 'Parking permit, renovou? Fiscal de rua não perdoa.' },
-      { type: 'followup', entity: 'Pagar mensalidade do futebol do Luigi', output: 'Futebol do Luigi, pagou a mensalidade? Craque precisa de campo.' }
+      { type: 'followup', entity: 'Pagar mensalidade do futebol do Luigi', output: 'Futebol do Luigi, pagou a mensalidade? Craque precisa de campo.' },
+      { type: 'shopping_list_send', entity: 'leite, ovos, café, papel higiênico', output: 'Lista da semana tá aqui: leite, ovos, café, papel higiênico. Qual o dia do mercado?' },
+      { type: 'shopping_list_send', entity: 'arroz, frango, detergente', output: 'Lista pro mercado: arroz, frango, detergente. Qual dia vai?' },
+      { type: 'shopping_list_date_reminder', entity: 'leite, ovos, café', output: 'E a lista da semana, qual o dia do mercado?' },
+      { type: 'shopping_list_date_reminder', entity: 'arroz, frango', output: 'Lista esperando — qual o dia do mercado?' }
     ]
   }
 };
@@ -210,11 +222,29 @@ async function processUser(user, now, ukNow) {
     }
   }
 
+  // ---- 4.4 — SHOPPING LIST SEMANAL ----
+  // Envio: sexta 17-19h UTC (sexta noite UK).
+  // Fallback: sábado 7-10h UTC, se user não respondeu a data.
+  if (user.shopping_list_enabled !== false && remaining > 0) {
+    if (isFridayEvening(ukNow) && !user.pending_shopping_list_date) {
+      // Sexta à noite: manda lista nova
+      const shoppingSent = await processShoppingList(user, ukNow);
+      if (shoppingSent) {
+        remaining--;
+        sent++;
+      }
+    } else if (isSaturdayMorning(ukNow) && user.pending_shopping_list_date) {
+      // Sábado manhã: user não respondeu data da lista de ontem
+      const reminderSent = await remindShoppingListDate(user, ukNow);
+      if (reminderSent) {
+        remaining--;
+        sent++;
+      }
+    }
+  }
+
   // ---- 4.7 — DAILY BRIEFING (placeholder) ----
   // TODO: Phase 4.7 — consolidar agenda + pendências do dia em 1 mensagem
-
-  // ---- 4.4 — LISTA DE COMPRAS SEMANAL (placeholder) ----
-  // TODO: Phase 4.4 — agregar shopping_items da semana
 
   return sent;
 }
@@ -519,4 +549,116 @@ function addDays(date, days) {
   const result = new Date(date);
   result.setDate(result.getDate() + days);
   return result;
+}
+
+// ============================================
+// TIMING HELPERS — SHOPPING LIST (4.4)
+// ============================================
+// Sexta à noite UK (17h-20h UK time) — janela pra enviar a lista semanal
+function isFridayEvening(ukNow) {
+  return ukNow.getDay() === 5 && ukNow.getHours() >= 17 && ukNow.getHours() <= 20;
+}
+
+// Sábado de manhã UK (7h-10h UK time) — janela pra cobrar data da lista
+function isSaturdayMorning(ukNow) {
+  return ukNow.getDay() === 6 && ukNow.getHours() >= 7 && ukNow.getHours() <= 10;
+}
+
+// ============================================
+// 4.4 — SHOPPING LIST: processShoppingList
+// Busca shopping_items pendentes, dedupe, manda lista + pergunta data
+// ============================================
+async function processShoppingList(user, ukNow) {
+  const phone = user.phone_number;
+
+  // Buscar items pendentes
+  const items = await getPendingShoppingItems(phone);
+  if (items.length === 0) {
+    console.log(`[Cron] ${phone}: no pending shopping items, skipping list`);
+    return false;
+  }
+
+  const entity = items.join(', ');
+  console.log(`[Cron] ${phone}: shopping list items — ${entity}`);
+
+  // Gerar mensagem com persona
+  const message = await generateProactiveMessage(user, {
+    type: 'shopping_list_send',
+    entity: entity
+  });
+
+  if (!message) return false;
+
+  await sendWhatsAppMessage(phone, message);
+  await logProactive(phone, 'shopping_list', null, message);
+  // Seta flag pra webhook interceptar próxima mensagem como resposta de data
+  await updateUserField(phone, 'pending_shopping_list_date', true);
+  console.log(`[Cron] ${phone}: sent shopping list — "${message}"`);
+  return true;
+}
+
+// ============================================
+// 4.4 — SHOPPING LIST: remindShoppingListDate
+// Fallback de sábado: user não respondeu a data, relembra
+// ============================================
+async function remindShoppingListDate(user, ukNow) {
+  const phone = user.phone_number;
+
+  // Buscar items pra incluir no lembrete (mesma query)
+  const items = await getPendingShoppingItems(phone);
+  const entity = items.slice(0, 4).join(', '); // Mostra só os primeiros 4 no lembrete
+
+  const message = await generateProactiveMessage(user, {
+    type: 'shopping_list_date_reminder',
+    entity: entity || 'itens pendentes'
+  });
+
+  if (!message) return false;
+
+  await sendWhatsAppMessage(phone, message);
+  await logProactive(phone, 'shopping_list', null, message);
+  console.log(`[Cron] ${phone}: sent shopping list date reminder — "${message}"`);
+  return true;
+}
+
+// ============================================
+// QUERY: PENDING SHOPPING ITEMS (4.4)
+// Busca messages com metadata.shopping_items preenchido e task_status=pending
+// Dedupe case-insensitive
+// ============================================
+async function getPendingShoppingItems(phoneNumber) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/messages?phone_number=eq.${encodeURIComponent(phoneNumber)}&task_status=eq.pending&metadata->shopping_items=not.is.null&select=id,metadata&order=created_at.asc`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
+
+  if (!res.ok) {
+    console.error('[Cron] getPendingShoppingItems failed:', res.status, await res.text());
+    return [];
+  }
+
+  const rows = await res.json();
+  const seen = new Set();
+  const items = [];
+
+  for (const row of rows) {
+    const rawItems = row?.metadata?.shopping_items;
+    if (!Array.isArray(rawItems)) continue;
+    // Ignora mensagens que são a PRÓPRIA lista consolidada (evita loop)
+    if (row?.metadata?.shopping_list === true) continue;
+    for (const item of rawItems) {
+      if (typeof item !== 'string') continue;
+      const key = item.trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      items.push(item.trim());
+    }
+  }
+
+  return items;
 }
