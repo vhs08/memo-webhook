@@ -750,6 +750,7 @@ async function processMessage(body) {
   const waMessageId = message.id;
 
   console.log(`Received ${messageType} from ${phoneNumber} (wa_id: ${waMessageId})`);
+  const processStart = Date.now();
 
   // --- Fix #9: Dedup de webhook duplicado (Meta manda at-least-once) ---
   if (waMessageId) {
@@ -800,6 +801,7 @@ async function processMessage(body) {
       // --- Fix: Validação de qualidade da transcrição ---
       if (!isTranscriptionReliable(originalText)) {
         console.log(`Unreliable transcription detected: "${originalText}"`);
+        logMetric('whisper_rejected', phoneNumber, { text: originalText, duration: message.audio?.duration });
         await sendWhatsAppReply(
           phoneNumber,
           '⚠️ Não consegui entender bem o áudio. Pode mandar de novo ou digitar por texto?'
@@ -808,6 +810,7 @@ async function processMessage(body) {
       }
     } catch (err) {
       console.error('Whisper transcription failed:', err);
+      logMetric('whisper_fail', phoneNumber, { error: err.message });
       await sendWhatsAppReply(phoneNumber, '⚠️ Não consegui transcrever o áudio. Tenta mandar por texto?');
       return;
     }
@@ -913,6 +916,7 @@ async function processMessage(body) {
       user_display_name: userDisplayName,
       onboarding_state: 'done'
     });
+    logMetric('onboarding_complete', phoneNumber, { persona: user.persona, memo_name: user.memo_name });
 
     // Primeira fala OFICIAL já no tom da persona escolhida com o nome do usuário
     const persona = user.persona;
@@ -941,6 +945,7 @@ async function processMessage(body) {
     const confirmPatterns = /\b(sim|confirmo|confirmar|yes|pode|quero|certeza)\b/i;
     if (confirmPatterns.test(originalText)) {
       await eraseUserData(phoneNumber);
+      logMetric('erasure', phoneNumber, {});
       await sendWhatsAppReply(
         phoneNumber,
         `Todos os seus dados foram excluídos. ✅\n\nSe quiser usar o Memo novamente no futuro, é só mandar uma mensagem. Até mais! 👋`
@@ -1107,7 +1112,9 @@ async function processMessage(body) {
     }
 
     await sendWhatsAppReply(phoneNumber, reply);
-    console.log('Persona reply sent to user');
+    const latencyMs = Date.now() - processStart;
+    console.log(`Persona reply sent to user (${latencyMs}ms)`);
+    logMetric('message_processed', phoneNumber, { type: storedType, category: result.category, latency_ms: latencyMs });
 
     // Fire-and-forget: salva o reply sem esperar (não bloqueia resposta)
     saveBotReply(phoneNumber, reply).catch(saveErr => {
@@ -1115,6 +1122,7 @@ async function processMessage(body) {
     });
   } catch (err) {
     console.error('Persona reply failed, using fallback:', err);
+    logMetric('reply_fail', phoneNumber, { error: err.message, category });
     // Fallback: template estático antigo
     const emoji = CATEGORY_EMOJI[category] || '📦';
     const preview = originalText.length > 80 ? originalText.substring(0, 80) + '...' : originalText;
@@ -2084,6 +2092,26 @@ Responda APENAS com o JSON, nada mais.`;
   }
 
   return { category, metadata, due_at, task_status };
+}
+
+// ============================================
+// MONITORING — registra métricas no Supabase (fire-and-forget)
+// ============================================
+function logMetric(eventType, phoneNumber, details = {}) {
+  fetch(`${SUPABASE_URL}/rest/v1/metrics`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      Prefer: 'return=minimal'
+    },
+    body: JSON.stringify({
+      event_type: eventType,
+      phone_number: phoneNumber || null,
+      details: details
+    })
+  }).catch(err => console.error(`logMetric failed: ${err.message}`));
 }
 
 // ============================================
