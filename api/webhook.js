@@ -926,37 +926,32 @@ async function processMessage(body) {
   // --- Onboarding completo → fluxo normal de captura ---
   // user.onboarding_state === 'done'
 
+  // --- GDPR: Right-to-erasure — intercepta confirmação ANTES de tudo ---
+  if (user.pending_erasure) {
+    const confirmPatterns = /\b(sim|confirmo|confirmar|yes|pode|quero|certeza)\b/i;
+    if (confirmPatterns.test(originalText)) {
+      await eraseUserData(phoneNumber);
+      await sendWhatsAppReply(
+        phoneNumber,
+        `Todos os seus dados foram excluídos. ✅\n\nSe quiser usar o Memo novamente no futuro, é só mandar uma mensagem. Até mais! 👋`
+      );
+      return;
+    } else {
+      await updateUser(phoneNumber, { pending_erasure: false });
+      await sendWhatsAppReply(phoneNumber, `Exclusão cancelada. Seus dados continuam seguros. 😊`);
+      return;
+    }
+  }
+
   // --- GDPR: Right-to-erasure — detecta pedido de exclusão ---
   const erasurePatterns = /\b(apague? meus dados|exclua? meus dados|delete my data|quero sair|remove meus dados|apagar minha conta|deletar minha conta|excluir minha conta)\b/i;
   if (erasurePatterns.test(originalText)) {
-    // Checa se é confirmação de exclusão já em andamento
-    if (user.pending_erasure) {
-      const confirmPatterns = /\b(sim|confirmo|confirmar|yes|pode|quero|certeza)\b/i;
-      if (confirmPatterns.test(originalText)) {
-        await eraseUserData(phoneNumber);
-        await sendWhatsAppReply(
-          phoneNumber,
-          `Todos os seus dados foram excluídos. ✅\n\nSe quiser usar o Memo novamente no futuro, é só mandar uma mensagem. Até mais! 👋`
-        );
-        return;
-      } else {
-        await updateUser(phoneNumber, { pending_erasure: false });
-        await sendWhatsAppReply(phoneNumber, `Exclusão cancelada. Seus dados continuam seguros. 😊`);
-        return;
-      }
-    }
-    // Primeiro pedido — pede confirmação
     await updateUser(phoneNumber, { pending_erasure: true });
     await sendWhatsAppReply(
       phoneNumber,
       `⚠️ Isso vai excluir *todos* os seus dados permanentemente — mensagens, lembretes, agenda, configurações. Essa ação não pode ser desfeita.\n\nTem certeza? Responde *sim* pra confirmar ou qualquer outra coisa pra cancelar.`
     );
     return;
-  }
-
-  // Se tinha pending_erasure mas mandou outra coisa (não confirmou), limpa flag
-  if (user.pending_erasure) {
-    await updateUser(phoneNumber, { pending_erasure: false });
   }
 
   // --- 4.4: Checar se é resposta à pergunta de data da shopping list ---
