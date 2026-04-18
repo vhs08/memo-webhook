@@ -231,6 +231,45 @@ export default async function handler(req, res) {
   });
 
   // ============================================
+  // TESTES: Rate Limiter
+  // ============================================
+  function createRateLimiter(maxRequests, windowMs) {
+    const map = new Map();
+    return {
+      isLimited(phone) {
+        const now = Date.now();
+        const timestamps = map.get(phone) || [];
+        const recent = timestamps.filter(t => now - t < windowMs);
+        if (recent.length >= maxRequests) {
+          map.set(phone, recent);
+          return true;
+        }
+        recent.push(now);
+        map.set(phone, recent);
+        return false;
+      },
+      reset() { map.clear(); }
+    };
+  }
+
+  const limiter = createRateLimiter(3, 1000); // 3 por segundo pra teste rápido
+
+  test('Rate limit: primeiras 3 mensagens passam', () => {
+    limiter.reset();
+    assert(!limiter.isLimited('test1'), '1a deveria passar');
+    assert(!limiter.isLimited('test1'), '2a deveria passar');
+    assert(!limiter.isLimited('test1'), '3a deveria passar');
+  });
+
+  test('Rate limit: 4a mensagem bloqueada', () => {
+    assert(limiter.isLimited('test1'), '4a deveria ser bloqueada');
+  });
+
+  test('Rate limit: outro número não é afetado', () => {
+    assert(!limiter.isLimited('test2'), 'Outro número deveria passar');
+  });
+
+  // ============================================
   // RESULTADO — HTML formatado
   // ============================================
   const total = passed + failed;
