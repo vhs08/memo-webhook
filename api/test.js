@@ -195,7 +195,7 @@ export default async function handler(req, res) {
   // TESTES: Followup response classification (regex only)
   // ============================================
   const donePatterns = /\b(sim|fiz|feito|já|pronto|pago|paguei|resolvi|resolvido|entreguei|mandei|liguei|agendei|comprei|troquei|cancelei|marquei|fui|tratei|dei entrada)\b/i;
-  const snoozePatterns = /\b(ainda não|não ainda|depois|amanhã|semana que vem|mais tarde|próxima semana|não deu|não consegui)\b/i;
+  const snoozePatterns = /(?:^|\s|\b)(ainda não|não ainda|depois|amanhã|semana que vem|mais tarde|próxima semana|não deu|não consegui)(?=\s|$|[.,!?])/i;
   const postEventGoodPatterns = /\b(foi bem|foi bom|foi ótimo|foi boa|tudo bem|tudo certo|tudo ok|correu bem|deu certo|tranquilo|de boa|suave|beleza|foi tudo bem)\b/i;
 
   test('Followup: "já fiz" = done', () => {
@@ -231,15 +231,51 @@ export default async function handler(req, res) {
   });
 
   // ============================================
-  // RESULTADO
+  // RESULTADO — HTML formatado
   // ============================================
-  const summary = {
-    total: passed + failed,
-    passed,
-    failed,
-    status: failed === 0 ? 'ALL PASS ✅' : `${failed} FAILURES ❌`,
-    results
-  };
+  const total = passed + failed;
+  const statusText = failed === 0 ? '✅ ALL PASS' : `❌ ${failed} FAILURE${failed > 1 ? 'S' : ''}`;
+  const statusColor = failed === 0 ? '#22c55e' : '#ef4444';
 
-  return res.status(200).json(summary);
+  let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Memo Tests</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#111; color:#eee; padding:24px; }
+  h1 { font-size:24px; margin-bottom:8px; }
+  .summary { font-size:18px; margin-bottom:24px; padding:16px; border-radius:8px; background:#1a1a1a; border-left:4px solid ${statusColor}; }
+  .summary .status { color:${statusColor}; font-weight:700; }
+  .section { margin-bottom:20px; }
+  .section-title { font-size:16px; font-weight:600; color:#888; margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid #333; }
+  .test { padding:6px 12px; margin:2px 0; border-radius:4px; font-size:14px; font-family:monospace; }
+  .pass { background:#0a2e0a; color:#4ade80; }
+  .fail { background:#2e0a0a; color:#f87171; }
+  .fail .error { color:#fca5a5; font-size:12px; margin-left:8px; }
+  .time { color:#666; font-size:13px; margin-top:12px; }
+</style></head><body>
+<h1>Memo Test Suite</h1>
+<div class="summary">
+  <span class="status">${statusText}</span> — ${passed}/${total} passed
+</div>`;
+
+  let currentSection = '';
+  for (const r of results) {
+    const section = r.name.split(':')[0].trim();
+    if (section !== currentSection) {
+      if (currentSection) html += '</div>';
+      currentSection = section;
+      html += `<div class="section"><div class="section-title">${section}</div>`;
+    }
+    if (r.status === 'PASS') {
+      html += `<div class="test pass">✓ ${r.name}</div>`;
+    } else {
+      html += `<div class="test fail">✗ ${r.name}<span class="error">${r.error}</span></div>`;
+    }
+  }
+  html += '</div>';
+  html += `<div class="time">Ran at ${new Date().toISOString()}</div>`;
+  html += '</body></html>';
+
+  res.setHeader('Content-Type', 'text/html');
+  return res.status(200).send(html);
 }
