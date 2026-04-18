@@ -796,6 +796,16 @@ async function processMessage(body) {
       audioUrl = `meta_media_id:${audioId}`;
       storedType = 'audio';
       console.log(`Transcribed audio: "${originalText}"`);
+
+      // --- Fix: Validação de qualidade da transcrição ---
+      if (!isTranscriptionReliable(originalText)) {
+        console.log(`Unreliable transcription detected: "${originalText}"`);
+        await sendWhatsAppReply(
+          phoneNumber,
+          '⚠️ Não consegui entender bem o áudio. Pode mandar de novo ou digitar por texto?'
+        );
+        return;
+      }
     } catch (err) {
       console.error('Whisper transcription failed:', err);
       await sendWhatsAppReply(phoneNumber, '⚠️ Não consegui transcrever o áudio. Tenta mandar por texto?');
@@ -1295,7 +1305,53 @@ async function fetchRecentBotReplies(phoneNumber, limit = 3) {
 }
 
 // ============================================
-// TRANSCRIÇÃO DE ÁUDIO (Whisper) — inalterado do Phase 2
+// VALIDAÇÃO DE TRANSCRIÇÃO — detecta garbage do Whisper quando áudio é ruim
+// ============================================
+function isTranscriptionReliable(text) {
+  if (!text || text.trim().length === 0) return false;
+
+  const trimmed = text.trim();
+
+  // 1. Muito curto (< 3 caracteres) — provavelmente lixo
+  if (trimmed.length < 3) return false;
+
+  // 2. Texto é só pontuação, números ou caracteres repetidos
+  if (/^[\s\d\W]+$/.test(trimmed)) return false;
+
+  // 3. Whisper hallucination patterns — frases genéricas que Whisper inventa
+  const hallucinationPatterns = [
+    /^(obrigad[oa]|tchau|ok|oi|sim|não|olá|hey|hello|bye|thanks|thank you)[.!]?$/i,
+    /^\.+$/,                          // só pontos
+    /^(.)\1{4,}$/,                    // mesmo caractere repetido 5+ vezes
+    /legendas?\s*(por|pela)\s*/i,     // "Legendas por..." (Whisper watermark)
+    /inscreva-se/i,                   // Whisper confunde com YouTube
+    /subscribe/i,
+    /amara\.org/i,                    // Whisper hallucination conhecida
+    /www\./i,                         // URLs inventadas
+    /música\s*$/i,                    // Whisper transcreve silêncio como "Música"
+  ];
+
+  for (const pattern of hallucinationPatterns) {
+    if (pattern.test(trimmed)) return false;
+  }
+
+  // 4. Muita repetição de palavras (sinal de loop do Whisper)
+  const words = trimmed.toLowerCase().split(/\s+/);
+  if (words.length >= 4) {
+    const uniqueWords = new Set(words);
+    const uniqueRatio = uniqueWords.size / words.length;
+    if (uniqueRatio < 0.3) return false; // 70%+ das palavras são repetidas
+  }
+
+  // 5. Proporção de caracteres não-alfabéticos muito alta
+  const alphaChars = trimmed.replace(/[^a-záàâãéèêíïóôõúüçñ]/gi, '').length;
+  if (trimmed.length > 5 && alphaChars / trimmed.length < 0.4) return false;
+
+  return true;
+}
+
+// ============================================
+// TRANSCRIÇÃO DE ÁUDIO (Whisper)
 // ============================================
 async function transcribeAudio(mediaId) {
   // Passo 1: pedir à Meta a URL de download do arquivo
