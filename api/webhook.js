@@ -1407,10 +1407,10 @@ async function classifyFollowupResponse(text) {
 
   // Pattern matching rápido pra respostas óbvias (evita chamada GPT)
   // Regex com (palavra)(\b|$) permite trailing text tipo "foi tudo bem", "já paguei agora"
-  const donePatterns = /^(sim|feito|feita|já|ja|fiz|paguei|comprei|marquei|resolvi|resolvido|pronto|pronta|ok|okay|beleza|done|yes|yep|foi|mandei|tá feito|ta feito|tá resolvido|ta resolvido|renovei|entreguei|cumpri)\b/i;
-  const postEventGoodPatterns = /^(foi (tudo )?(bem|bom|ótimo|otimo|legal|massa|tranquilo|tranquilla|show|perfeito|rápido|rapido|ok|normal|certo)|tudo (bem|certo|ok|tranquilo)|correu bem|deu tudo certo|foi suave|sem problema|ganhei|ganhamos|perdi|perdemos)/i;
-  const snoozePatterns = /^(não|nao|ainda não|ainda nao|depois|amanhã|amanha|semana que vem|mais tarde|no|not yet|vou fazer|vou resolver|ainda|pendente|hoje mais tarde|fim de semana)\b/i;
-  const cancelPatterns = /^(cancela|cancelar|esquece|não precisa|nao precisa|remove|tira|desiste|ignora|não quero|nao quero|cancelado|cancelou|remarcou|adiou)\b/i;
+  const donePatterns = /^(sim|feito|feita|já|ja|fiz|paguei|comprei|marquei|resolvi|resolvido|pronto|pronta|ok|okay|beleza|done|yes|yep|foi|mandei|tá feito|ta feito|tá resolvido|ta resolvido|renovei|entreguei|cumpri)(?=\s|$|[.,!?])/i;
+  const postEventGoodPatterns = /^(foi (tudo )?(bem|bom|ótimo|otimo|legal|massa|tranquilo|tranquilla|show|perfeito|rápido|rapido|ok|normal|certo)|tudo (bem|certo|ok|tranquilo)|correu bem|deu tudo certo|foi suave|sem problema|ganhei|ganhamos|perdi|perdemos)(?=\s|$|[.,!?])/i;
+  const snoozePatterns = /^(não|nao|ainda não|ainda nao|depois|amanhã|amanha|semana que vem|mais tarde|no|not yet|vou fazer|vou resolver|ainda|pendente|hoje mais tarde|fim de semana)(?=\s|$|[.,!?])/i;
+  const cancelPatterns = /^(cancela|cancelar|esquece|não precisa|nao precisa|remove|tira|desiste|ignora|não quero|nao quero|cancelado|cancelou|remarcou|adiou)(?=\s|$|[.,!?])/i;
 
   if (donePatterns.test(lower) || postEventGoodPatterns.test(lower)) return 'done';
   if (snoozePatterns.test(lower)) return 'snoozed';
