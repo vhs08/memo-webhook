@@ -1,12 +1,12 @@
-// Memo Assistant — WhatsApp Webhook Handler (Launch Readiness v17)
-// Fluxo: recebe mensagem → dedup (wa_message_id) → reaction 👀 imediata → (consentimento GDPR + onboarding se user novo)
+// Memo Assistant — WhatsApp Webhook Handler (Launch Readiness v18)
+// Fluxo: recebe mensagem → rate limit → dedup (wa_message_id) → reaction 👀 imediata → (consentimento GDPR + onboarding se user novo)
 //         → (áudio vira texto via Whisper) → categoriza com GPT-4o-mini (timezone dinâmico + datas relativas)
 //         → grava no Supabase → GERA REPLY COM PERSONA via Claude
 // Categorias (5): FINANCAS, COMPRAS, AGENDA, IDEIAS, LEMBRETES
 // Personas ativas (2): ceo (Focado), tiolegal (Descontraído) — com regra anti-alucinação
 // Phase 4: due_at (ISO date) e task_status (pending/done) salvos pra cron proativo
 // Cron separado em api/cron.js — roda diário, manda reminders e follow-ups
-// Arquitetura v17: v16 + consentimento GDPR obrigatório (awaiting_consent) + right-to-erasure ("apague meus dados") + privacy policy link
+// Arquitetura v18: v17 + rate limiting (10msg/min por número) com cleanup periódico
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -699,6 +699,44 @@ const PERSONA_LABELS = {
 };
 
 // ============================================
+// RATE LIMITER — proteção contra flood/abuse
+// 10 mensagens por minuto por número. Map em memória (persiste enquanto instância Vercel está quente).
+// ============================================
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minuto
+const RATE_LIMIT_MAX = 10;              // máximo de mensagens por janela
+const rateLimitMap = new Map();          // phoneNumber → [timestamps]
+
+function isRateLimited(phoneNumber) {
+  const now = Date.now();
+  const timestamps = rateLimitMap.get(phoneNumber) || [];
+
+  // Remove timestamps fora da janela
+  const recent = timestamps.filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+
+  if (recent.length >= RATE_LIMIT_MAX) {
+    rateLimitMap.set(phoneNumber, recent);
+    return true;
+  }
+
+  recent.push(now);
+  rateLimitMap.set(phoneNumber, recent);
+  return false;
+}
+
+// Cleanup periódico — evita memory leak em instâncias longas
+setInterval(() => {
+  const now = Date.now();
+  for (const [phone, timestamps] of rateLimitMap) {
+    const recent = timestamps.filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+    if (recent.length === 0) {
+      rateLimitMap.delete(phone);
+    } else {
+      rateLimitMap.set(phone, recent);
+    }
+  }
+}, 5 * 60 * 1000); // a cada 5 minutos
+
+// ============================================
 // MAIN HANDLER
 // ============================================
 export default async function handler(req, res) {
@@ -751,6 +789,17 @@ async function processMessage(body) {
 
   console.log(`Received ${messageType} from ${phoneNumber} (wa_id: ${waMessageId})`);
   const processStart = Date.now();
+
+  // --- Rate limiting: proteção contra flood ---
+  if (isRateLimited(phoneNumber)) {
+    console.log(`Rate limited: ${phoneNumber}`);
+    logMetric('rate_limited', phoneNumber, {});
+    await sendWhatsAppReply(
+      phoneNumber,
+      '⚠️ Muitas mensagens de uma vez. Espera um minutinho e tenta de novo.'
+    );
+    return;
+  }
 
   // --- Fix #9: Dedup de webhook duplicado (Meta manda at-least-once) ---
   if (waMessageId) {
