@@ -1,12 +1,12 @@
-// Memo Assistant — WhatsApp Webhook Handler (Phase 4.3 — Proativo + Fixes v12)
-// Fluxo: recebe mensagem → dedup (wa_message_id) → reaction 👀 imediata → (onboarding se user novo)
+// Memo Assistant — WhatsApp Webhook Handler (Launch Readiness v17)
+// Fluxo: recebe mensagem → dedup (wa_message_id) → reaction 👀 imediata → (consentimento GDPR + onboarding se user novo)
 //         → (áudio vira texto via Whisper) → categoriza com GPT-4o-mini (timezone dinâmico + datas relativas)
 //         → grava no Supabase → GERA REPLY COM PERSONA via Claude
 // Categorias (5): FINANCAS, COMPRAS, AGENDA, IDEIAS, LEMBRETES
 // Personas ativas (2): ceo (Focado), tiolegal (Descontraído) — com regra anti-alucinação
 // Phase 4: due_at (ISO date) e task_status (pending/done) salvos pra cron proativo
 // Cron separado em api/cron.js — roda diário, manda reminders e follow-ups
-// Arquitetura v16: Claude Sonnet + MULTI-TURN few-shot + Vercel Cron + dedup + timezone dinâmico + reaction condicional + shopping list 4.4 + recorrência 4.5 + post-event 4.6 (confirmações diferenciadas AGENDA vs LEMBRETES)
+// Arquitetura v17: v16 + consentimento GDPR obrigatório (awaiting_consent) + right-to-erasure ("apague meus dados") + privacy policy link
 
 // ============================================
 // ENVIRONMENT VARIABLES (configuradas no Vercel)
@@ -810,11 +810,37 @@ async function processMessage(body) {
   let user = earlyUser;
 
   if (!user) {
-    // Primeira mensagem — cria row já em 'awaiting_name' e manda pergunta 1
+    // Primeira mensagem — cria row já em 'awaiting_consent' e manda política de privacidade
     await createUser(phoneNumber);
     await sendWhatsAppReply(
       phoneNumber,
-      `Oi! 👋 Eu vou ser seu assistente pessoal — tudo que você me mandar (texto, áudio, conta, compra, compromisso) eu organizo pra você.\n\nAntes de começar, preciso de 3 coisinhas rápidas.\n\n*1/3 — Que nome você quer me dar?*\n(Se não quiser escolher, é só mandar "Memo")`
+      `Oi! 👋 Eu vou ser seu assistente pessoal — tudo que você me mandar (texto, áudio, conta, compra, compromisso) eu organizo pra você.\n\nAntes de começar, preciso que leia e aceite nossa política de privacidade:\n🔗 https://signalloom.com/privacy\n\nResumindo: seus dados ficam seguros, não vendemos nada pra ninguém, e você pode pedir exclusão total a qualquer momento.\n\nConcorda e quer continuar? Responde *sim* ou *aceito*.`
+    );
+    return;
+  }
+
+  // --- Consentimento (GDPR) ---
+  if (user.onboarding_state === 'awaiting_consent') {
+    const response = (originalText || '').trim().toLowerCase();
+    const acceptPatterns = ['sim', 'aceito', 'aceitar', 'ok', 'yes', 'concordo', 'acordo', 'pode', 'bora', 's', '1', 'claro', 'com certeza'];
+    const accepted = acceptPatterns.some(p => response.includes(p));
+
+    if (!accepted) {
+      await sendWhatsAppReply(
+        phoneNumber,
+        `Sem problema! Pra usar o Memo preciso do seu consentimento. Se mudar de ideia, é só mandar *sim* ou *aceito*. 😊`
+      );
+      return;
+    }
+
+    await updateUser(phoneNumber, {
+      consent_given: true,
+      consent_at: new Date().toISOString(),
+      onboarding_state: 'awaiting_name'
+    });
+    await sendWhatsAppReply(
+      phoneNumber,
+      `Perfeito, consentimento registrado! ✅\n\nAgora vamos configurar seu assistente — 3 coisinhas rápidas.\n\n*1/3 — Que nome você quer me dar?*\n(Se não quiser escolher, é só mandar "Memo")`
     );
     return;
   }
@@ -899,6 +925,39 @@ async function processMessage(body) {
 
   // --- Onboarding completo → fluxo normal de captura ---
   // user.onboarding_state === 'done'
+
+  // --- GDPR: Right-to-erasure — detecta pedido de exclusão ---
+  const erasurePatterns = /\b(apague? meus dados|exclua? meus dados|delete my data|quero sair|remove meus dados|apagar minha conta|deletar minha conta|excluir minha conta)\b/i;
+  if (erasurePatterns.test(originalText)) {
+    // Checa se é confirmação de exclusão já em andamento
+    if (user.pending_erasure) {
+      const confirmPatterns = /\b(sim|confirmo|confirmar|yes|pode|quero|certeza)\b/i;
+      if (confirmPatterns.test(originalText)) {
+        await eraseUserData(phoneNumber);
+        await sendWhatsAppReply(
+          phoneNumber,
+          `Todos os seus dados foram excluídos. ✅\n\nSe quiser usar o Memo novamente no futuro, é só mandar uma mensagem. Até mais! 👋`
+        );
+        return;
+      } else {
+        await updateUser(phoneNumber, { pending_erasure: false });
+        await sendWhatsAppReply(phoneNumber, `Exclusão cancelada. Seus dados continuam seguros. 😊`);
+        return;
+      }
+    }
+    // Primeiro pedido — pede confirmação
+    await updateUser(phoneNumber, { pending_erasure: true });
+    await sendWhatsAppReply(
+      phoneNumber,
+      `⚠️ Isso vai excluir *todos* os seus dados permanentemente — mensagens, lembretes, agenda, configurações. Essa ação não pode ser desfeita.\n\nTem certeza? Responde *sim* pra confirmar ou qualquer outra coisa pra cancelar.`
+    );
+    return;
+  }
+
+  // Se tinha pending_erasure mas mandou outra coisa (não confirmou), limpa flag
+  if (user.pending_erasure) {
+    await updateUser(phoneNumber, { pending_erasure: false });
+  }
 
   // --- 4.4: Checar se é resposta à pergunta de data da shopping list ---
   if (user.pending_shopping_list_date) {
@@ -1122,6 +1181,40 @@ async function fetchUser(phoneNumber) {
   return rows?.[0] || null;
 }
 
+// GDPR Right-to-erasure — deleta TUDO do usuário (messages, proactive_log, users)
+async function eraseUserData(phoneNumber) {
+  const encodedPhone = encodeURIComponent(phoneNumber);
+  const headers = {
+    'Content-Type': 'application/json',
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${SUPABASE_KEY}`,
+    Prefer: 'return=minimal'
+  };
+
+  // 1. Deletar mensagens
+  const msgRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/messages?phone_number=eq.${encodedPhone}`,
+    { method: 'DELETE', headers }
+  );
+  if (!msgRes.ok) console.error(`eraseUserData: messages delete failed: ${msgRes.status}`);
+
+  // 2. Deletar proactive_log
+  const logRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/proactive_log?phone_number=eq.${encodedPhone}`,
+    { method: 'DELETE', headers }
+  );
+  if (!logRes.ok) console.error(`eraseUserData: proactive_log delete failed: ${logRes.status}`);
+
+  // 3. Deletar user (por último)
+  const userRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/users?phone_number=eq.${encodedPhone}`,
+    { method: 'DELETE', headers }
+  );
+  if (!userRes.ok) console.error(`eraseUserData: users delete failed: ${userRes.status}`);
+
+  console.log(`GDPR erasure completed for ${phoneNumber}`);
+}
+
 async function createUser(phoneNumber) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/users`, {
     method: 'POST',
@@ -1133,7 +1226,7 @@ async function createUser(phoneNumber) {
     },
     body: JSON.stringify({
       phone_number: phoneNumber,
-      onboarding_state: 'awaiting_name'
+      onboarding_state: 'awaiting_consent'
     })
   });
   if (!res.ok) {
