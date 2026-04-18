@@ -814,7 +814,7 @@ async function processMessage(body) {
     await createUser(phoneNumber);
     await sendWhatsAppReply(
       phoneNumber,
-      `Oi! 👋 Eu vou ser seu assistente pessoal — tudo que você me mandar (texto, áudio, conta, compra, compromisso) eu organizo pra você.\n\nAntes de começar, preciso que leia e aceite nossa política de privacidade:\n🔗 https://signalloom.com/privacy\n\nResumindo: seus dados ficam seguros, não vendemos nada pra ninguém, e você pode pedir exclusão total a qualquer momento.\n\nConcorda e quer continuar? Responde *sim* ou *aceito*.`
+      `Oi! 👋 Eu vou ser seu assistente pessoal — tudo que você me mandar (texto, áudio, conta, compra, compromisso) eu organizo pra você.\n\nAntes de começar, preciso que leia e aceite nossa política de privacidade:\n🔗 https://vhs08.github.io/signalloom-site/privacy\n\nResumindo: seus dados ficam seguros, não vendemos nada pra ninguém, e você pode pedir exclusão total a qualquer momento.\n\nConcorda e quer continuar? Responde *sim* ou *aceito*.`
     );
     return;
   }
