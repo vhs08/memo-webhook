@@ -73,6 +73,7 @@ export default async function handler(req, res) {
         reply_failures: counts.reply_fail || 0,
         onboardings: counts.onboarding_complete || 0,
         erasures: counts.erasure || 0,
+        rate_limited: counts.rate_limited || 0,
         avg_latency_ms: avgLatency
       },
       timestamp: new Date().toISOString()
